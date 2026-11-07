@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # weekly: catch breaking changes in new ESPHome releases
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests (crypto, interop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - run: tests/run_unit_tests.sh
+
+  e2e:
+    name: End-to-end (host platform + simulator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - run: pip install esphome
+      - run: python3 -u tests/e2e/run_e2e.py --esphome esphome
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            tests/e2e/.out/*.log
+            tests/e2e/.out/*.state.json
+
+  compile:
+    name: Compile ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [esp32-arduino, esp32-idf, esp8266]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install esphome
+      - name: Dummy secrets
+        working-directory: examples
+        run: |
+          cat > secrets.yaml <<'SECRETS'
+          wifi_ssid: "ci-ssid"
+          wifi_password: "ci-password"
+          fingerprint_sync_key: "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="
+          fingerprint_delete_all_code: "CI_ONLY_CODE"
+          SECRETS
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ matrix.example }}-${{ hashFiles('examples/*.yaml') }}
+      - run: esphome config examples/${{ matrix.example }}.yaml
+      - run: esphome compile examples/${{ matrix.example }}.yaml

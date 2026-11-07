@@ -1,0 +1,41 @@
+# Example: ESP8266 (Wemos D1 mini). The R503 runs on a software UART (GPIO12/14);
+# sync metadata lives in the sensor's notepad because the ESP8266 flash preference
+# area is too small.
+substitutions:
+  sensing_pin: GPIO5
+  enroll_button_pin: GPIO4
+
+esphome:
+  name: reader-office
+
+esp8266:
+  board: d1_mini
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+  baud_rate: 0
+web_server:
+  port: 80
+ota:
+  platform: esphome
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [fingerprint_sync]
+
+uart:
+  id: uart_sensor
+  rx_pin: GPIO14
+  tx_pin: GPIO12
+  baud_rate: 57600
+
+packages:
+  fingerprint_sync: !include common-fingerprint-sync.yaml
+
+fingerprint_sync:
+  metadata_storage: sensor_notepad

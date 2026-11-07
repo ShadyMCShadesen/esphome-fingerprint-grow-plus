@@ -1,0 +1,139 @@
+# Shared part of the examples: fingerprint_sync plus the three enrollment methods
+# that work without Home Assistant (physical button, web UI, admin finger).
+# Include it with `packages:` and provide the substitutions listed below.
+#
+# Required substitutions: sensing_pin, enroll_button_pin
+
+fingerprint_grow:
+  id: grow
+  uart_id: uart_sensor
+  sensing_pin:
+    number: ${sensing_pin}
+    allow_other_uses: true
+
+fingerprint_sync:
+  id: fp_sync
+  fingerprint_grow_id: grow
+  uart_id: uart_sensor
+  key: !secret fingerprint_sync_key
+  # All nodes in one list; the node skips itself automatically.
+  peers:
+    - reader-garden.local
+    - reader-garage.local
+    - 192.168.10.23
+    - reader-office.example.lan:18530
+  # Only accept peers from these networks (optional).
+  allowed_networks:
+    - 192.168.10.0/24
+  # Slots 180-199 stay local on every node (node-exclusive range).
+  exclude_slots: ["180-199"]
+  enroll_slots: "1-179"
+  delete_all_code: !secret fingerprint_delete_all_code
+  finger_sensor: finger_detected
+  fingerprint_count_sensor: fingerprint_count
+  # Admin finger: touch slot 0 twice within 5 s to enroll a new finger in the next free slot.
+  admin:
+    slot: 0
+    touches: 2
+    window: 5s
+    num_scans: 3
+  # Recommended for the very first run on existing sensors: only log what would happen.
+  dry_run: false
+  on_sync_started:
+    - logger.log: "fingerprint sync started"
+  on_sync_done:
+    - logger.log: "fingerprint sync done"
+  on_sync_failed:
+    - logger.log:
+        format: "fingerprint sync failed: %s"
+        args: [reason.c_str()]
+  on_conflict:
+    - logger.log:
+        level: WARN
+        format: "slot %u holds different fingers on different nodes"
+        args: [slot]
+  on_enroll_started:
+    - fingerprint_grow.aura_led_control:
+        state: FLASHING
+        speed: 50
+        color: PURPLE
+        count: 0
+
+binary_sensor:
+  - platform: gpio
+    id: finger_detected
+    name: Finger detected
+    pin:
+      number: ${sensing_pin}
+      inverted: true
+      allow_other_uses: true
+  # Method 1: physical button enrolls the next free slot.
+  - platform: gpio
+    id: enroll_button
+    name: Enroll button
+    pin:
+      number: ${enroll_button_pin}
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 50ms
+    on_press:
+      - fingerprint_sync.enroll_next_free:
+          num_scans: 3
+  - platform: fingerprint_sync
+    syncing:
+      name: Fingerprint sync running
+
+sensor:
+  - platform: fingerprint_grow
+    fingerprint_count:
+      id: fingerprint_count
+      name: Fingerprint count
+  - platform: fingerprint_sync
+    peers_reachable:
+      name: Fingerprint sync peers reachable
+    error_count:
+      name: Fingerprint sync errors
+    conflict_count:
+      name: Fingerprint sync conflicts
+
+text_sensor:
+  - platform: fingerprint_sync
+    status:
+      name: Fingerprint sync status
+
+# Method 2: web UI (web_server) - pick a slot or use the next free one.
+number:
+  - platform: template
+    id: enroll_slot
+    name: Enroll slot
+    optimistic: true
+    min_value: 1
+    max_value: 179
+    step: 1
+    initial_value: 1
+
+button:
+  - platform: template
+    name: Enroll next free slot
+    on_press:
+      - fingerprint_sync.enroll_next_free: 3
+  - platform: template
+    name: Enroll selected slot
+    on_press:
+      - fingerprint_grow.enroll:
+          finger_id: !lambda "return (uint16_t) id(enroll_slot).state;"
+          num_scans: 3
+  - platform: template
+    name: Delete selected slot on all nodes
+    on_press:
+      - fingerprint_sync.delete: !lambda "return (uint16_t) id(enroll_slot).state;"
+  - platform: template
+    name: Sync fingerprints now
+    on_press:
+      - fingerprint_sync.sync
+  - platform: template
+    name: Allow restore for 5 minutes
+    entity_category: config
+    on_press:
+      - fingerprint_sync.allow_restore: 5min
