@@ -1,0 +1,26 @@
+# ESPHome
+.esphome/
+secrets.yaml
+**/secrets.yaml
+*.bin
+*.elf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ruff_cache/
+.pytest_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Niemals echte Fingerabdruck-Templates committen
+*.tpl
+*.template
+*.fpt
+templates/
+dumps/
