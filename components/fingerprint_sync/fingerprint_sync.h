@@ -1,0 +1,330 @@
+#pragma once
+
+#include "esphome/core/automation.h"
+#include "esphome/core/component.h"
+#include "esphome/core/defines.h"
+#include "esphome/core/helpers.h"
+#include "esphome/components/fingerprint_grow/fingerprint_grow.h"
+#include "esphome/components/uart/uart.h"
+#ifdef USE_SENSOR
+#include "esphome/components/sensor/sensor.h"
+#endif
+#ifdef USE_BINARY_SENSOR
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#endif
+#ifdef USE_TEXT_SENSOR
+#include "esphome/components/text_sensor/text_sensor.h"
+#endif
+#ifdef USE_TIME
+#include "esphome/components/time/real_time_clock.h"
+#endif
+
+#include "grow_link.h"
+#include "meta_storage.h"
+#include "protocol.h"
+#include "secure_channel.h"
+#include "tcp_transport.h"
+
+#include <array>
+#include <deque>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace esphome::fingerprint_sync {
+
+struct Peer {
+  const char *host;
+  uint16_t port;
+};
+
+struct SlotRange {
+  uint16_t from;
+  uint16_t to;
+};
+
+enum class MetaBackend : uint8_t { PREFERENCES, NOTEPAD };
+
+enum class JobType : uint8_t {
+  REFRESH_INDEX,
+  HASH,
+  SERVE,
+  WRITE,
+  COMPARE,
+  DELETE,
+  COUNT,
+  SAVE_META,
+};
+
+enum JobFlag : uint8_t {
+  JOB_FLAG_ENROLLED = 1 << 0,   // HASH after a local enrollment
+  JOB_FLAG_REPLACE = 1 << 1,    // WRITE replaces a different finger (forced by the peer)
+  JOB_FLAG_RESTORE = 1 << 2,    // WRITE from a restore session
+  JOB_FLAG_REMOTE = 1 << 3,     // DELETE caused by a peer tombstone
+  JOB_FLAG_LOCAL = 1 << 4,      // DELETE requested on this node
+  JOB_FLAG_PROPAGATE = 1 << 5,  // start a sync round once the job is done
+};
+
+struct Job {
+  JobType type;
+  uint16_t slot{0};
+  uint16_t meta{0};
+  uint8_t flags{0};
+  uint32_t session{0};
+  std::array<uint8_t, HASH_SIZE> hash{};
+  std::vector<uint8_t> data;
+};
+
+struct Session {
+  enum class Phase : uint8_t { IDLE, CONNECTING, HANDSHAKE, SYNC };
+  Phase phase{Phase::IDLE};
+  bool is_client{false};
+  Stream *stream{nullptr};
+  uint32_t gen{0};
+  uint32_t started_ms{0};
+  uint32_t last_rx_ms{0};
+  const Peer *peer{nullptr};
+  SecureChannel channel;
+  std::vector<uint8_t> tx;
+  std::vector<uint16_t> pull;
+  size_t pull_pos{0};
+  bool awaiting_template{false};
+  uint16_t awaiting_slot{0};
+  uint8_t jobs_pending{0};
+  uint8_t serve_pending{0};
+  bool manifest_received{false};
+  bool done_sent{false};
+  bool done_received{false};
+  uint16_t pulled{0};
+  uint16_t served{0};
+};
+
+class FingerprintSyncComponent : public Component, public uart::UARTDevice {
+ public:
+  // ---- configuration (called from generated code) ----
+  void set_fingerprint_grow(fingerprint_grow::FingerprintGrowComponent *grow) { this->grow_ = grow; }
+  void set_key(const std::array<uint8_t, PSK_SIZE> &key) { this->psk_ = key; }
+  void set_port(uint16_t port) { this->transport_.set_port(port); }
+  void set_sensor_address(uint32_t address) { this->link_.set_address(address); }
+  void add_peer(const char *host, uint16_t port) { this->peers_.push_back(Peer{host, port}); }
+  void add_include_range(uint16_t from, uint16_t to) { this->include_.push_back(SlotRange{from, to}); }
+  void add_exclude_range(uint16_t from, uint16_t to) { this->exclude_.push_back(SlotRange{from, to}); }
+  void set_sync_interval(uint32_t ms) { this->sync_interval_ms_ = ms; }
+  void set_startup_delay(uint32_t ms) { this->startup_delay_ms_ = ms; }
+  void set_dry_run(bool dry_run) { this->dry_run_ = dry_run; }
+  void set_meta_backend(MetaBackend backend) { this->backend_ = backend; }
+  void set_delete_all_code(const char *code) { this->delete_all_code_ = code; }
+  void set_admin(uint16_t slot, uint8_t touches, uint32_t window_ms, uint8_t num_scans) {
+    this->admin_enabled_ = true;
+    this->admin_slot_ = slot;
+    this->admin_touches_ = touches;
+    this->admin_window_ms_ = window_ms;
+    this->admin_num_scans_ = num_scans;
+  }
+  void set_enroll_range(uint16_t from, uint16_t to) {
+    this->enroll_from_ = from;
+    this->enroll_to_ = to;
+  }
+  void set_finger_sensor(binary_sensor::BinarySensor *sensor) { this->finger_sensor_ = sensor; }
+  void set_fingerprint_count_sensor(sensor::Sensor *sensor) { this->count_sensor_ = sensor; }
+#ifdef USE_SOCKET_IPV4_ALLOW
+  void set_allowed_networks(const socket::Ipv4AllowEntry *entries, size_t count) {
+    this->transport_.set_allow(entries, count);
+  }
+#endif
+#ifdef USE_TIME
+  void set_time(time::RealTimeClock *time) { this->time_ = time; }
+#endif
+#ifdef USE_SENSOR
+  void set_peers_reachable_sensor(sensor::Sensor *s) { this->peers_reachable_sensor_ = s; }
+  void set_error_count_sensor(sensor::Sensor *s) { this->error_count_sensor_ = s; }
+  void set_conflict_count_sensor(sensor::Sensor *s) { this->conflict_count_sensor_ = s; }
+  void set_last_sync_sensor(sensor::Sensor *s) { this->last_sync_sensor_ = s; }
+#endif
+#ifdef USE_TEXT_SENSOR
+  void set_status_text_sensor(text_sensor::TextSensor *s) { this->status_text_sensor_ = s; }
+#endif
+#ifdef USE_BINARY_SENSOR
+  void set_syncing_binary_sensor(binary_sensor::BinarySensor *s) { this->syncing_binary_sensor_ = s; }
+#endif
+
+  // ---- triggers ----
+  template<typename F> void add_on_sync_started_callback(F &&cb) { this->sync_started_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_sync_done_callback(F &&cb) { this->sync_done_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_sync_failed_callback(F &&cb) { this->sync_failed_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_conflict_callback(F &&cb) { this->conflict_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_slot_updated_callback(F &&cb) { this->slot_updated_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_slot_deleted_callback(F &&cb) { this->slot_deleted_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_enroll_started_callback(F &&cb) {
+    this->enroll_started_cb_.add(std::forward<F>(cb));
+  }
+
+  // ---- actions / public API ----
+  /// Start a sync round with all peers as soon as possible.
+  void sync_now();
+  /// Delete a slot here and on all peers (tombstone).
+  void delete_slot(uint16_t slot);
+  /// Delete all managed slots here and on all peers. Requires the configured code.
+  void delete_all(const std::string &code);
+  /// Enroll the lowest slot that is free on this node and on all peers seen since boot.
+  void enroll_next_free(uint8_t num_scans);
+  /// Resolve a conflict: keep this node's finger (pushed to all peers) or take the peer's.
+  void resolve_conflict(uint16_t slot, bool keep_local);
+  /// Accept MSG_RESTORE from the backup tool for `seconds`.
+  void allow_restore(uint32_t seconds);
+  /// Lowest free slot inside the enroll range, or -1.
+  int32_t next_free_slot() const;
+  bool is_syncing() const { return this->round_active_; }
+  bool is_ready() const { return this->ready_; }
+  uint16_t conflict_count() const;
+
+  // ---- Component ----
+  void setup() override;
+  void loop() override;
+  void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
+
+ protected:
+  struct Decision {
+    enum Kind : uint8_t { NOTHING, PULL, ADOPT, DELETE } kind{NOTHING};
+    uint16_t meta{0};
+  };
+
+  bool managed_(uint16_t slot) const;
+  bool sensor_available_();
+  uint16_t next_version_();
+  void mark_dirty_();
+  void request_round_(uint32_t delay_ms);
+  void set_status_(const char *status);
+  void publish_diagnostics_();
+  void queue_job_(Job &&job);
+  void queue_simple_job_(JobType type, uint16_t slot = 0, uint8_t flags = 0);
+  void run_next_job_();
+  void finish_indexing_if_done_();
+
+  // jobs
+  void job_refresh_index_();
+  void job_hash_(Job &job);
+  void job_serve_(Job &job);
+  void job_write_(Job &job);
+  void job_compare_(Job &job);
+  void job_delete_(Job &job);
+  void job_count_();
+  void job_save_meta_();
+  bool store_verified_(uint8_t buffer, uint16_t slot, const std::vector<uint8_t> &data);
+  void apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash);
+
+  // sync logic
+  Decision decide_(uint16_t slot, uint16_t remote_meta, const uint8_t *remote_hash) const;
+  void process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash);
+  void handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, const uint8_t *data,
+                        size_t len);
+  void flag_conflict_(uint16_t slot);
+
+  // sessions
+  bool is_self_(const Peer &peer) const;
+  void start_client_session_(const Peer &peer);
+  void start_server_session_();
+  void service_session_(Session &s);
+  void handle_message_(Session &s, const std::vector<uint8_t> &msg);
+  void send_message_(Session &s, const std::vector<uint8_t> &msg);
+  void send_manifest_(Session &s);
+  void send_simple_(Session &s, uint8_t type, uint16_t slot, uint8_t value, bool with_value);
+  void end_session_(Session &s, bool ok, const char *reason);
+  Session *session_by_gen_(uint32_t gen);
+  void run_round_();
+
+  // ---- configuration ----
+  fingerprint_grow::FingerprintGrowComponent *grow_{nullptr};
+  std::array<uint8_t, PSK_SIZE> psk_{};
+  std::vector<Peer> peers_;
+  std::vector<SlotRange> include_;
+  std::vector<SlotRange> exclude_;
+  uint32_t sync_interval_ms_{15 * 60 * 1000};
+  uint32_t startup_delay_ms_{10000};
+  bool dry_run_{false};
+  MetaBackend backend_{MetaBackend::PREFERENCES};
+  const char *delete_all_code_{nullptr};
+  bool admin_enabled_{false};
+  uint16_t admin_slot_{0};
+  uint8_t admin_touches_{2};
+  uint32_t admin_window_ms_{5000};
+  uint8_t admin_num_scans_{3};
+  uint16_t enroll_from_{1};
+  uint16_t enroll_to_{0xFFFF};
+  binary_sensor::BinarySensor *finger_sensor_{nullptr};
+  sensor::Sensor *count_sensor_{nullptr};
+#ifdef USE_TIME
+  time::RealTimeClock *time_{nullptr};
+#endif
+#ifdef USE_SENSOR
+  sensor::Sensor *peers_reachable_sensor_{nullptr};
+  sensor::Sensor *error_count_sensor_{nullptr};
+  sensor::Sensor *conflict_count_sensor_{nullptr};
+  sensor::Sensor *last_sync_sensor_{nullptr};
+#endif
+#ifdef USE_TEXT_SENSOR
+  text_sensor::TextSensor *status_text_sensor_{nullptr};
+#endif
+#ifdef USE_BINARY_SENSOR
+  binary_sensor::BinarySensor *syncing_binary_sensor_{nullptr};
+#endif
+
+  // ---- runtime ----
+  GrowLink link_;
+  TcpTransport transport_;
+  std::unique_ptr<MetaStorage> storage_;
+  uint32_t node_id_{0};
+  uint32_t boot_ms_{0};
+  bool params_loaded_{false};
+  bool ready_{false};
+  bool failed_sensor_{false};
+  uint16_t capacity_{0};
+  uint16_t clock_{0};
+  std::vector<uint16_t> meta_;
+  std::vector<std::array<uint8_t, HASH_SIZE>> hash_;
+  std::vector<bool> hash_known_;
+  std::vector<bool> local_present_;
+  std::vector<bool> remote_present_;
+  std::vector<bool> conflict_;
+  std::vector<bool> conflict_reported_;
+  std::deque<Job> jobs_;
+  uint16_t pending_hash_{0};
+  bool refresh_queued_{false};
+  bool count_queued_{false};
+  bool save_queued_{false};
+  bool meta_dirty_{false};
+  uint32_t meta_dirty_ms_{0};
+  bool enrolling_{false};
+  uint32_t last_activity_ms_{0};
+  uint32_t retry_ms_{0};
+  uint32_t admin_first_ms_{0};
+  uint8_t admin_hits_{0};
+  uint32_t restore_until_ms_{0};
+  bool restore_open_{false};
+  uint32_t error_count_{0};
+  const char *status_{""};
+
+  // rounds
+  bool round_active_{false};
+  bool round_refreshing_{false};
+  bool round_requested_{false};
+  uint32_t round_due_ms_{0};
+  size_t round_peer_idx_{0};
+  uint8_t round_reachable_{0};
+  uint8_t round_failures_{0};
+  std::string round_last_error_;
+  uint32_t session_gen_{0};
+  Session inbound_;
+  Session outbound_;
+
+  CallbackManager<void()> sync_started_cb_;
+  CallbackManager<void()> sync_done_cb_;
+  CallbackManager<void(std::string)> sync_failed_cb_;
+  CallbackManager<void(uint16_t)> conflict_cb_;
+  CallbackManager<void(uint16_t)> slot_updated_cb_;
+  CallbackManager<void(uint16_t)> slot_deleted_cb_;
+  CallbackManager<void(uint16_t)> enroll_started_cb_;
+};
+
+}  // namespace esphome::fingerprint_sync
