@@ -1,0 +1,35 @@
+# CLAUDE.md – project context
+
+ESPHome external component `fingerprint_sync`: synchronises GROW (R503/R30x) fingerprint
+templates directly between ESPHome nodes (no Home Assistant, no broker, no cloud).
+
+## Layout
+- `components/fingerprint_sync/` – the component
+  - `grow_link.*` R503 template commands on the shared UART (one complete transaction per call)
+  - `secure_channel.*` handshake + ChaCha20/HMAC record layer; `crypto.*` primitives
+  - `transport.h`, `tcp_transport.*` transport abstraction (TCP via ESPHome socket helpers)
+  - `protocol.h` messages and slot metadata encoding; `meta_storage.*` persistence
+  - `fingerprint_sync.*` job queue, sync decisions, sessions, rounds
+  - `__init__.py`, `sensor.py`, `text_sensor.py`, `binary_sensor.py` codegen
+- `tools/fpsync.py` backup/restore/status CLI (stdlib only, must stay byte-compatible)
+- `tests/` unit tests (`run_unit_tests.sh`), simulator (`sim/`), end-to-end (`e2e/run_e2e.py`)
+- `examples/` generic, invented example configs; `docs/` documentation (German guide in `docs/de/`)
+
+## Decisions
+- Separate component next to the official `fingerprint_grow` (class is `final`, helpers protected).
+- Sensor access only in jobs, max one job per `loop()`, never split a sensor transaction across
+  loops; no jobs during enrollment, while a finger is on the sensor, or 1.5 s after scan activity.
+- Anti-entropy with per-slot Lamport versions + tombstones; absence is never deletion.
+- Different finger in the same slot => conflict, never overwrite (unless explicitly forced).
+- Never implement SetPwd/SetSysPara. Never log template bytes.
+- Target the current ESPHome release (new automation API: `register_apply_action`,
+  `build_callback_automations`).
+
+## Conventions
+- C++: ESPHome style (`this->`, trailing `_` for protected members), English comments.
+- Every change: `tests/run_unit_tests.sh` and `python3 tests/e2e/run_e2e.py` must pass.
+- Protocol changes: bump `PROTOCOL_VERSION`, update `docs/protocol.md` and `tools/fpsync.py`.
+
+## Privacy rules (public repository)
+- Never commit real node configurations, device names, pins, IP addresses, entity IDs,
+  secrets, keys or template dumps/backups. Examples must be invented and generic.
