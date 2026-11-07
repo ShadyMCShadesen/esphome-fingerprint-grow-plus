@@ -155,6 +155,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   template<typename F> void add_on_conflict_callback(F &&cb) { this->conflict_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_slot_updated_callback(F &&cb) { this->slot_updated_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_slot_deleted_callback(F &&cb) { this->slot_deleted_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_admin_touch_callback(F &&cb) { this->admin_touch_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_enroll_started_callback(F &&cb) {
     this->enroll_started_cb_.add(std::forward<F>(cb));
   }
@@ -325,6 +326,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   CallbackManager<void(uint16_t)> slot_updated_cb_;
   CallbackManager<void(uint16_t)> slot_deleted_cb_;
   CallbackManager<void(uint16_t)> enroll_started_cb_;
+  CallbackManager<void(uint8_t)> admin_touch_cb_;
 };
 
 }  // namespace esphome::fingerprint_sync

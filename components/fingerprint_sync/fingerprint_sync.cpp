@@ -60,6 +60,7 @@ void FingerprintSyncComponent::setup() {
     } else {
       this->admin_hits_++;
     }
+    this->admin_touch_cb_.call(this->admin_hits_);
     if (this->admin_hits_ >= this->admin_touches_) {
       this->admin_hits_ = 0;
       ESP_LOGI(TAG, "Admin finger confirmed, starting enrollment of the next free slot");

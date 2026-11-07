@@ -14,7 +14,8 @@ versioning: [Semantic Versioning](https://semver.org/).
   1:1 match, convergence of separately enrolled identical fingers.
 - Actions `sync`, `delete`, `delete_all`, `enroll_next_free`, `resolve_conflict`,
   `allow_restore`; conditions `is_syncing`, `is_ready`; sync triggers.
-- Admin finger enrollment, include/exclude slot ranges, dry-run mode, source network allow list.
+- Admin finger enrollment (with `on_admin_touch` trigger for feedback), include/exclude slot ranges,
+  dry-run mode, source network allow list.
 - Diagnostic sensor, text sensor and binary sensor platforms.
 - `tools/fpsync.py` for encrypted backup, restore and status.
 - Host unit tests, R503 simulator, end-to-end test on the ESPHome host platform, CI.

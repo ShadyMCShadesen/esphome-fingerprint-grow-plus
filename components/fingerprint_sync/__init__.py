@@ -52,6 +52,7 @@ CONF_ON_CONFLICT = "on_conflict"
 CONF_ON_SLOT_UPDATED = "on_slot_updated"
 CONF_ON_SLOT_DELETED = "on_slot_deleted"
 CONF_ON_ENROLL_STARTED = "on_enroll_started"
+CONF_ON_ADMIN_TOUCH = "on_admin_touch"
 
 DEFAULT_PORT = 18530
 
@@ -185,6 +186,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ON_SLOT_UPDATED): automation.validate_automation({}),
             cv.Optional(CONF_ON_SLOT_DELETED): automation.validate_automation({}),
             cv.Optional(CONF_ON_ENROLL_STARTED): automation.validate_automation({}),
+            cv.Optional(CONF_ON_ADMIN_TOUCH): automation.validate_automation({}),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -218,6 +220,9 @@ _CALLBACK_AUTOMATIONS = (
     ),
     automation.CallbackAutomation(
         CONF_ON_ENROLL_STARTED, "add_on_enroll_started_callback", [(cg.uint16, "slot")]
+    ),
+    automation.CallbackAutomation(
+        CONF_ON_ADMIN_TOUCH, "add_on_admin_touch_callback", [(cg.uint8, "touches")]
     ),
 )
 

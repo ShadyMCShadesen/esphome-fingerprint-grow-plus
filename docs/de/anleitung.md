@@ -55,7 +55,9 @@ nicht benötigt.
 - **Taster:** `fingerprint_sync.enroll_next_free` im `on_press` eines GPIO-Binary-Sensors.
 - **Weboberfläche:** Template-Buttons im `web_server` (siehe `examples/common-fingerprint-sync.yaml`).
 - **Admin-Finger:** Slot 0 zweimal innerhalb von 5 s auflegen. Danach wird der nächste freie Slot
-  eingelernt.
+  eingelernt. Der Admin-Finger darf keine normalen Aktionen auslösen: In
+  `on_finger_scan_matched` den Slot 0 ausschließen (`finger_id != 0`). Für LED-Feedback nach dem
+  ersten Auflegen gibt es den Trigger `on_admin_touch`.
 
 ## Backup und Restore
 

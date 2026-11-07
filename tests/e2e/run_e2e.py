@@ -105,6 +105,10 @@ fingerprint_sync:
     - logger.log:
         format: "TEST-EVENT conflict %u"
         args: [slot]
+  on_admin_touch:
+    - logger.log:
+        format: "TEST-EVENT admin_touch %u"
+        args: [touches]
   on_enroll_started:
     - logger.log:
         format: "TEST-EVENT enroll_started %u"
@@ -310,6 +314,9 @@ def main():
         c.touch("node-a", "admin")
         time.sleep(1.5)
         c.touch("node-a", "admin")
+        results.append(wait_until("on_admin_touch fired for touch 1 and 2",
+                                  lambda: "TEST-EVENT admin_touch 1" in c.log("node-a")
+                                  and "TEST-EVENT admin_touch 2" in c.log("node-a"), 20))
         results.append(wait_until("enrollment started for slot 3",
                                   lambda: "TEST-EVENT enroll_started 3" in c.log("node-a"), 20))
         time.sleep(1.5)

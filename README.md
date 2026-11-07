@@ -115,6 +115,22 @@ fingerprint_sync:
   on_slot_updated: …               # variable: uint16_t slot (received/replaced/restored)
   on_slot_deleted: …               # variable: uint16_t slot
   on_enroll_started: …             # variable: uint16_t slot (enroll_next_free / admin finger)
+  on_admin_touch: …                # variable: uint8_t touches (admin finger matched, 1..touches)
+```
+
+### Admin finger
+
+`admin.slot` (default 0) only arms enrollment. `fingerprint_grow` still reports the match, so
+exclude that slot from your normal actions:
+
+```yaml
+fingerprint_grow:
+  on_finger_scan_matched:
+    - if:
+        condition:
+          lambda: "return finger_id != 0;"   # admin finger never opens anything
+        then:
+          - script.execute: open_door
 ```
 
 The component never controls the LEDs itself. Use the triggers to fit sync feedback into your

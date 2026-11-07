@@ -10,6 +10,16 @@ fingerprint_grow:
   sensing_pin:
     number: ${sensing_pin}
     allow_other_uses: true
+  on_finger_scan_matched:
+    - if:
+        # Slot 0 is the admin finger: it only arms enrollment (fingerprint_sync admin)
+        # and must never trigger the normal actions (open door, ...).
+        condition:
+          lambda: "return finger_id != 0;"
+        then:
+          - logger.log:
+              format: "finger %u matched - your door/gate action goes here"
+              args: [finger_id]
 
 fingerprint_sync:
   id: fp_sync
@@ -52,6 +62,13 @@ fingerprint_sync:
         level: WARN
         format: "slot %u holds different fingers on different nodes"
         args: [slot]
+  on_admin_touch:
+    # First touch of the admin finger: show that the node waits for the second touch.
+    - fingerprint_grow.aura_led_control:
+        state: FLASHING
+        speed: 50
+        color: CYAN
+        count: 5
   on_enroll_started:
     - fingerprint_grow.aura_led_control:
         state: FLASHING
