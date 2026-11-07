@@ -5,6 +5,24 @@ secrets.yaml
 *.bin
 *.elf
 
+# Private node configurations never belong in this public repository
+/private/
+steuerung-*.yaml
+*.private.yaml
+
+# Biometric data: template dumps and backups
+*.fpsb
+*.tpl
+*.template
+*.fpt
+templates/
+dumps/
+backups/
+
+# Tests
+tests/e2e/.out/
+tests/host/.esphome/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -17,10 +35,3 @@ venv/
 .vscode/
 .idea/
 .DS_Store
-
-# Niemals echte Fingerabdruck-Templates committen
-*.tpl
-*.template
-*.fpt
-templates/
-dumps/
