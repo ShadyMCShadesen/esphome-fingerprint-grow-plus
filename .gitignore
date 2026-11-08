@@ -7,11 +7,11 @@ secrets.yaml
 
 # Private node configurations never belong in this public repository
 /private/
-steuerung-*.yaml
 *.private.yaml
 
 # Biometric data: template dumps and backups
 *.fgpb
+*.fpsb
 *.tpl
 *.template
 *.fpt
