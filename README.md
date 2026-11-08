@@ -17,9 +17,9 @@ involved in the sync.
 - **Slot IDs are preserved**, so automations that depend on a slot number keep working on every node.
 - **Anti-entropy sync.** After every enrollment or deletion the change is pushed at once, and a
   periodic full reconciliation catches nodes that were offline.
-- **No silent overwrites.** A slot with a *different* finger on two nodes is reported as a
-  conflict (`on_conflict`) and left alone until you resolve it. A slot with the same finger
-  enrolled separately is detected through the sensor's 1:1 match and converged.
+- **No silent overwrites.** Two different templates in the same slot are only ever kept or
+  reported as a conflict (`on_conflict`) and left alone until you resolve it. Templates that the
+  sensor's 1:1 match recognises as the same finger are kept side by side.
 - **Deletions propagate** with tombstones. `delete_all` needs a code and an explicit
   `confirm_cluster_wide: true`.
 - **Node-exclusive slot ranges** via `include_slots` / `exclude_slots`.
@@ -145,8 +145,9 @@ own LED logic.
 | `fingerprint_sync.delete_all` | `code`, `confirm_cluster_wide: true` | delete all managed slots on all nodes |
 | `fingerprint_sync.enroll_next_free` | `num_scans` (default 3) | enroll the lowest slot that is free on all known nodes |
 | `fingerprint_sync.resolve_conflict` | `slot`, `keep_local` | `true`: this node's finger wins everywhere; `false`: take the peer's finger |
+| `fingerprint_sync.resolve_all_conflicts` | `keep_local` | the same for every conflict of the last round (initial rollout: make one node the reference) |
 | `fingerprint_sync.allow_restore` | `duration` (default 5 min) | accept uploads from `tools/fpsync.py restore` |
-| `fingerprint_sync.self_test` | `slot` (default 0) | diagnostic: LoadChar/UpChar/DownChar/Match round trip on the own sensor, buffers only, logs every step |
+| `fingerprint_sync.self_test` | `slot` (default 0), `compare_slot` (optional) | diagnostic: LoadChar/UpChar/DownChar/Match round trip on the own sensor, buffers only, logs every step and scores |
 
 Conditions: `fingerprint_sync.is_syncing`, `fingerprint_sync.is_ready`.
 

@@ -45,6 +45,7 @@ CONF_TOUCHES = "touches"
 CONF_WINDOW = "window"
 CONF_CONFIRM_CLUSTER_WIDE = "confirm_cluster_wide"
 CONF_KEEP_LOCAL = "keep_local"
+CONF_COMPARE_SLOT = "compare_slot"
 CONF_ON_SYNC_STARTED = "on_sync_started"
 CONF_ON_SYNC_DONE = "on_sync_done"
 CONF_ON_SYNC_FAILED = "on_sync_failed"
@@ -380,10 +381,25 @@ automation.register_apply_action(
         {
             cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
             cv.Optional(CONF_SLOT, default=0): cv.templatable(cv.uint16_t),
+            # 65535 = none; otherwise also score this slot against compare_slot
+            cv.Optional(CONF_COMPARE_SLOT, default=65535): cv.templatable(cv.uint16_t),
         },
         key=CONF_SLOT,
     ),
-    automation.ApplyField(CONF_SLOT, "self_test", cg.uint16),
+    automation.ApplyCall(
+        "self_test({}, {})", ((CONF_SLOT, cg.uint16), (CONF_COMPARE_SLOT, cg.uint16))
+    ),
+)
+
+automation.register_apply_action(
+    "fingerprint_sync.resolve_all_conflicts",
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.Required(CONF_KEEP_LOCAL): cv.templatable(cv.boolean),
+        }
+    ),
+    automation.ApplyField(CONF_KEEP_LOCAL, "resolve_all_conflicts", cg.bool_),
 )
 
 automation.register_apply_condition(

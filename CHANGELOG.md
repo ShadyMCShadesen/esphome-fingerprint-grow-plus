@@ -9,10 +9,20 @@ versioning: [Semantic Versioning](https://semver.org/).
 - `fingerprint_sync.self_test` action: step-by-step LoadChar/UpChar/DownChar/Match diagnosis on
   the own sensor (buffers only).
 
+- `fingerprint_sync.resolve_all_conflicts` action for the initial rollout.
+- `self_test` option `compare_slot` to score two different slots.
+
+### Changed
+- A template the module matches as the same finger is no longer overwritten; both templates are
+  kept. Real R503 modules report *no match* even for identical templates (score 92), so the match
+  result is only a hint. Conflict messages include the score.
+- `DownChar` pauses 10 ms between data packets by default: without a pause a real R503 received a
+  corrupted template.
+
 ### Fixed
 - Sensor parameters are read twice and checked for plausibility; an inconsistent answer (seen as
   `capacity 2` on real hardware) no longer shrinks the managed slot range.
-- `DownChar` pauses briefly between data packets and logs any unsolicited answer of the module.
+- `DownChar` logs any unsolicited answer of the module.
 - `Match` waits up to 3 s instead of 1 s.
 - Error messages name the failed step, the received answer bytes, the template and packet size.
 - Simulator and docs use the template size observed on real R503 modules (1536 bytes).

@@ -133,7 +133,8 @@ interval:
           else if (c == "delete_all") id(fp_sync).delete_all("TEST_ALL");
           else if (c == "delete_all_wrong") id(fp_sync).delete_all("nope");
           else if (c == "allow_restore") id(fp_sync).allow_restore(120);
-          else if (c == "self_test") id(fp_sync).self_test(a);
+          else if (c == "self_test") id(fp_sync).self_test(a, b);
+          else if (c == "resolve_all") id(fp_sync).resolve_all_conflicts(a != 0);
 """
 
 
@@ -288,9 +289,11 @@ def main():
             "A, B and C hold slots 0, 1, 5 with the same fingers",
             lambda: all(all(c.slots(n).get(s) == f for s, f in common.items()) for n in ("node-a", "node-b", "node-c")),
             90))
+        sha_a, sha_b = c.sha("node-a", 2), c.sha("node-b", 2)
         results.append(wait_until(
-            "slot 2 (bob, enrolled separately on A and B) converged to identical bytes",
-            lambda: c.sha("node-a", 2) is not None and c.sha("node-a", 2) == c.sha("node-b", 2), 60))
+            "slot 2 (bob, enrolled separately on A and B) recognised as the same finger, nothing overwritten",
+            lambda: "Slot 2 holds the same finger as on the peer" in c.log("node-a") + c.log("node-b")
+            and c.sha("node-a", 2) == sha_a and c.sha("node-b", 2) == sha_b and sha_a != sha_b, 60))
         results.append(wait_until(
             "slot 2 on C (dave) was NOT overwritten and a conflict was reported",
             lambda: c.slots("node-c").get(2) == "dave" and "TEST-EVENT conflict 2" in c.log("node-c"), 60))
@@ -308,15 +311,16 @@ def main():
             lambda: "[dry run] would store slot 0" in c.log("node-e") and c.slots("node-e") == {9: "grace"}, 60))
 
         print("== Scenario 1b: sensor self test (buffers only)")
-        c.cmd("node-a", "self_test 0")
+        c.cmd("node-a", "self_test 0 1")
         results.append(wait_until(
             "self test: Match works without and after a download round trip",
             lambda: "SELF TEST 1: Match (no download)" in c.log("node-a")
             and len(re.findall(r"Match buffer 1 vs 2\s+-> 0x00", c.log("node-a"))) == 3
+            and "SELF TEST 5: slot 0 vs slot 1" in c.log("node-a")
             and "-- self test finished" in c.log("node-a"), 60))
 
-        print("== Scenario 2: resolve conflict on C by taking the peer's finger")
-        c.cmd("node-c", "resolve 2 0")
+        print("== Scenario 2: resolve all conflicts on C by taking the peers' fingers")
+        c.cmd("node-c", "resolve_all 0")
         results.append(wait_until("C slot 2 becomes bob", lambda: c.slots("node-c").get(2) == "bob", 60))
 
         print("== Scenario 3: admin finger enrolls the next free slot on A, propagates")

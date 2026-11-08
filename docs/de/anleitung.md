@@ -50,6 +50,19 @@ nicht benötigt.
 - Gerätebezogene Bereiche: `exclude_slots: ["180-199"]` hält diese Slots lokal.
 - Das Sensor-Passwort wird nie gesetzt oder geändert.
 
+## Erstinbetriebnahme mit bereits eingelernten Fingern
+
+Getrennt eingelernte Templates unterscheiden sich in den Bytes. Der R503 kann zwei gespeicherte
+Templates nicht zuverlässig als „gleicher Finger“ erkennen (selbst eine identische Kopie ergibt
+„kein Treffer“). Deshalb meldet der Sync bei bestehenden Anlagen zunächst **Konflikte**. Das ist
+gewollt, denn es wird nie geraten.
+
+1. Von jedem Sensor ein Backup ziehen (siehe unten).
+2. Den Node mit der richtigen Zuordnung Finger → Slot als Referenz wählen.
+3. **Nur dort** `fingerprint_sync.resolve_all_conflicts` mit `keep_local: true` auslösen. Im
+   `dry_run` zeigen die anderen Nodes `[dry run] would REPLACE slot …`.
+4. Passt alles, `dry_run: false` setzen.
+
 ## Einlernen ohne Home Assistant
 
 - **Taster:** `fingerprint_sync.enroll_next_free` im `on_press` eines GPIO-Binary-Sensors.

@@ -22,7 +22,15 @@
    python3 tools/fpsync.py inspect --in <node>-$(date +%F).fpsb
    ```
 
-5. **Hardware checks.** Run the compatibility tests in [testing.md](testing.md) (A1–A3).
+5. **Hardware checks.** Run the compatibility tests in [testing.md](testing.md) (A1–A4).
+   Nodes that already hold fingers will report **conflicts** for every slot whose template
+   differs. That is expected: the sync never guesses which finger is right.
+   - Decide which node holds the correct assignment of fingers to slots (the *reference*).
+   - With backups of all sensors in place, run `fingerprint_sync.resolve_all_conflicts` with
+     `keep_local: true` **on the reference node only**. Its templates become forced versions and
+     replace the conflicting slots on the other nodes. In `dry_run` they log
+     `[dry run] would REPLACE slot …`.
+   - Slots that exist only on other nodes are copied to the reference node and everywhere else.
 6. **Go live.** Set `dry_run: false` on both nodes and verify. Then add the remaining nodes,
    again with a dry run first.
 

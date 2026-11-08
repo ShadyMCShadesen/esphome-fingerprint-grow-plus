@@ -85,9 +85,18 @@ Decision for one slot, local `L`, remote `R`:
 
 **Compare:**
 
-- **Same finger:** converge deterministically. The higher version wins, then the higher hash.
-- **Different finger:** **conflict**. Nothing is written; `on_conflict(slot)` fires once and the
-  `conflict_count` sensor goes up. Resolve it with `resolve_conflict(slot, keep_local)`:
+- **Module reports a match:** the two templates are treated as the same finger and **both are
+  kept** (no overwrite); the pair is remembered until reboot and the higher version is adopted.
+- **No match:** **conflict**. Nothing is written; `on_conflict(slot)` fires once and the
+  `conflict_count` sensor goes up.
+
+> Observed on real R503 modules: `Match` of a template against an identical copy reports
+> *no match* (score 92 at security level 3). The template-to-template match is therefore treated
+> as a hint only. It never justifies replacing a stored finger, and conflicts on existing
+> installations are expected until they are resolved once.
+
+Resolve a conflict with `resolve_conflict(slot, keep_local)`, or all of them with
+`resolve_all_conflicts(keep_local)`:
   - `keep_local: true` marks the local template `PRESENT_FORCED` with a new version, and all
     peers replace theirs.
   - `keep_local: false` drops the local template without a tombstone, and the next round fetches

@@ -176,7 +176,10 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void allow_restore(uint32_t seconds);
   /// Diagnostic: exercise LoadChar/UpChar/DownChar/Match on `slot` using only the sensor's
   /// character buffers (no slot is written) and log every step.
-  void self_test(uint16_t slot);
+  void self_test(uint16_t slot, uint16_t compare_slot = NO_SLOT);
+  /// Resolve every conflict found in the last round at once (see resolve_conflict).
+  void resolve_all_conflicts(bool keep_local);
+  static constexpr uint16_t NO_SLOT = 0xFFFF;
   /// Lowest free slot inside the enroll range, or -1.
   int32_t next_free_slot() const;
   bool is_syncing() const { return this->round_active_; }
@@ -225,7 +228,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash);
   void handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, const uint8_t *data,
                         size_t len);
-  void flag_conflict_(uint16_t slot);
+  void flag_conflict_(uint16_t slot, uint16_t score);
 
   // sessions
   bool is_self_(const Peer &peer) const;
@@ -294,6 +297,9 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   std::vector<bool> remote_present_;
   std::vector<bool> conflict_;
   std::vector<bool> conflict_reported_;
+  /// Remote template hash the module matched as the same finger (kept side by side, RAM only).
+  std::vector<std::array<uint8_t, HASH_SIZE>> equivalent_;
+  std::vector<bool> equivalent_known_;
   std::deque<Job> jobs_;
   uint16_t pending_hash_{0};
   bool refresh_queued_{false};

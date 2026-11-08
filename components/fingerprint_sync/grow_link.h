@@ -104,7 +104,9 @@ class GrowLink {
   const char *last_step_{""};
   size_t last_rx_bytes_{0};
   size_t last_template_size_{0};
-  uint8_t packet_gap_ms_{5};
+  // Observed on a real R503: without a pause between DownChar data packets the template
+  // arrives corrupted (match score 0); 10 ms and 40 ms both work.
+  uint8_t packet_gap_ms_{10};
   uint8_t last_params_raw_[16]{};
 };
 
