@@ -58,12 +58,20 @@ class GrowLink {
   uint8_t load_char(uint8_t buffer, uint16_t slot);
   /// Upload CharBuffer `buffer` to the host (UpChar).
   uint8_t up_char(uint8_t buffer, std::vector<uint8_t> &out);
-  /// Download `data` into CharBuffer `buffer` (DownChar).
+  /// Download `data` into CharBuffer `buffer` (DownChar). `gap_ms` pauses between data
+  /// packets; afterwards the line is watched for `settle_ms` and anything the module sends
+  /// on its own is logged and discarded.
   uint8_t down_char(uint8_t buffer, const std::vector<uint8_t> &data);
+  uint8_t down_char(uint8_t buffer, const std::vector<uint8_t> &data, uint8_t gap_ms, uint16_t settle_ms);
+  void set_packet_gap_ms(uint8_t gap_ms) { this->packet_gap_ms_ = gap_ms; }
+  /// Plain liveness check (TempleteNum); true if the module answers at all.
+  bool ping();
+  /// Raw ReadSysPara answer (16 parameter bytes) of the last read_params() call.
+  const uint8_t *last_params_raw() const { return this->last_params_raw_; }
   uint8_t store(uint8_t buffer, uint16_t slot);
   uint8_t delete_char(uint16_t slot, uint16_t count);
   /// Compare CharBuffer1 with CharBuffer2. GROW_OK means "same finger".
-  uint8_t match(uint16_t &score);
+  uint8_t match(uint16_t &score, uint32_t timeout_ms = 3000);
   uint8_t read_notepad(uint8_t page, uint8_t out[32]);
   uint8_t write_notepad(uint8_t page, const uint8_t data[32]);
 
@@ -96,6 +104,8 @@ class GrowLink {
   const char *last_step_{""};
   size_t last_rx_bytes_{0};
   size_t last_template_size_{0};
+  uint8_t packet_gap_ms_{5};
+  uint8_t last_params_raw_[16]{};
 };
 
 }  // namespace esphome::fingerprint_sync

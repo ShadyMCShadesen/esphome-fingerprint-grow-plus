@@ -10,6 +10,7 @@ Exit code 0 = all scenarios passed.
 
 import argparse
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -132,6 +133,7 @@ interval:
           else if (c == "delete_all") id(fp_sync).delete_all("TEST_ALL");
           else if (c == "delete_all_wrong") id(fp_sync).delete_all("nope");
           else if (c == "allow_restore") id(fp_sync).allow_restore(120);
+          else if (c == "self_test") id(fp_sync).self_test(a);
 """
 
 
@@ -304,6 +306,14 @@ def main():
         results.append(wait_until(
             "dry-run node E logs planned writes but its sensor stays unchanged",
             lambda: "[dry run] would store slot 0" in c.log("node-e") and c.slots("node-e") == {9: "grace"}, 60))
+
+        print("== Scenario 1b: sensor self test (buffers only)")
+        c.cmd("node-a", "self_test 0")
+        results.append(wait_until(
+            "self test: Match works without and after a download round trip",
+            lambda: "SELF TEST 1: Match (no download)" in c.log("node-a")
+            and len(re.findall(r"Match buffer 1 vs 2\s+-> 0x00", c.log("node-a"))) == 3
+            and "-- self test finished" in c.log("node-a"), 60))
 
         print("== Scenario 2: resolve conflict on C by taking the peer's finger")
         c.cmd("node-c", "resolve 2 0")

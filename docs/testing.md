@@ -40,7 +40,8 @@ Recommended for the proof of concept: two nodes with the same hardware but diffe
 |---|---|---|---|
 | A1 | a template exported from sensor X matches on sensor Y | limit both nodes to one test slot (`include_slots: ["190"]`, `dry_run: false`), enroll a test finger there on node 1, sync, touch node 2 | `on_finger_scan_matched` with the same slot on node 2 |
 | A2 | `UpChar` of a slot returns identical bytes each time | log line `Template bytes of slot … changed` must not appear after two rounds | no such line (if it appears: harmless, sync still correct) |
-| A3 | template size 768 bytes, packet size from `ReadSysPara` | check log `Sensor: capacity 200, …, packet size … bytes` | values plausible |
+| A3 | template size and packet size | check `Slot N indexed (template … bytes)` and `Sensor: capacity …, packet size …` | **observed on R503: 1536 bytes, 128-byte packets** (manual: 768) |
+| A4 | `DownChar` + `Match` work on this module | run `fingerprint_sync.self_test` (slot 0) and read the `SELF TEST` lines | `Match buffer 1 vs 2 -> 0x00` in variants 2–4 |
 
 ### B. Functional tests
 

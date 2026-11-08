@@ -374,6 +374,18 @@ automation.register_apply_action(
     automation.ApplyField(CONF_DURATION, "allow_restore", cg.uint32),
 )
 
+automation.register_apply_action(
+    "fingerprint_sync.self_test",
+    cv.maybe_simple_value(
+        {
+            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.Optional(CONF_SLOT, default=0): cv.templatable(cv.uint16_t),
+        },
+        key=CONF_SLOT,
+    ),
+    automation.ApplyField(CONF_SLOT, "self_test", cg.uint16),
+)
+
 automation.register_apply_condition(
     "fingerprint_sync.is_syncing", _PARENT_SCHEMA, "is_syncing()"
 )

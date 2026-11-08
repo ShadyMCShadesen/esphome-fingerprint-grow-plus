@@ -24,7 +24,7 @@ import time
 import tty
 
 CAPACITY = 200
-TEMPLATE_SIZE = 768
+TEMPLATE_SIZE = 1536  # observed on real R503 modules (the manual says 768)
 PACKET_CODE = 2  # 128 byte data packets
 
 

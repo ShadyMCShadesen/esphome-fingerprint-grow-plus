@@ -146,6 +146,7 @@ own LED logic.
 | `fingerprint_sync.enroll_next_free` | `num_scans` (default 3) | enroll the lowest slot that is free on all known nodes |
 | `fingerprint_sync.resolve_conflict` | `slot`, `keep_local` | `true`: this node's finger wins everywhere; `false`: take the peer's finger |
 | `fingerprint_sync.allow_restore` | `duration` (default 5 min) | accept uploads from `tools/fpsync.py restore` |
+| `fingerprint_sync.self_test` | `slot` (default 0) | diagnostic: LoadChar/UpChar/DownChar/Match round trip on the own sensor, buffers only, logs every step |
 
 Conditions: `fingerprint_sync.is_syncing`, `fingerprint_sync.is_ready`.
 
@@ -183,6 +184,8 @@ binary_sensor:
 - One fingerprint sensor per node, one inbound and one outbound sync session at a time.
 - Templates must be compatible between the sensors (same model and firmware). This is not
   specified in the R503 manual; verify it on your hardware (docs/testing.md, test A1).
+- Real R503 modules upload 1536-byte templates (the manual says 768); the component reads the
+  size from the data stream and supports up to 2048 bytes.
 - Up to 1024 slots with `preferences`, 248 slots with `sensor_notepad`.
 - 16,383 versions (enrollments + deletions across the cluster) before the version counter must
   be reset (docs/protocol.md).

@@ -54,6 +54,7 @@ enum class JobType : uint8_t {
   DELETE,
   COUNT,
   SAVE_META,
+  SELF_TEST,
 };
 
 enum JobFlag : uint8_t {
@@ -173,6 +174,9 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void resolve_conflict(uint16_t slot, bool keep_local);
   /// Accept MSG_RESTORE from the backup tool for `seconds`.
   void allow_restore(uint32_t seconds);
+  /// Diagnostic: exercise LoadChar/UpChar/DownChar/Match on `slot` using only the sensor's
+  /// character buffers (no slot is written) and log every step.
+  void self_test(uint16_t slot);
   /// Lowest free slot inside the enroll range, or -1.
   int32_t next_free_slot() const;
   bool is_syncing() const { return this->round_active_; }
@@ -212,6 +216,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void job_delete_(Job &job);
   void job_count_();
   void job_save_meta_();
+  void job_self_test_(Job &job);
   bool store_verified_(uint8_t buffer, uint16_t slot, const std::vector<uint8_t> &data);
   void apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash);
 

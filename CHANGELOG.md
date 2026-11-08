@@ -5,6 +5,18 @@ versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `fingerprint_sync.self_test` action: step-by-step LoadChar/UpChar/DownChar/Match diagnosis on
+  the own sensor (buffers only).
+
+### Fixed
+- Sensor parameters are read twice and checked for plausibility; an inconsistent answer (seen as
+  `capacity 2` on real hardware) no longer shrinks the managed slot range.
+- `DownChar` pauses briefly between data packets and logs any unsolicited answer of the module.
+- `Match` waits up to 3 s instead of 1 s.
+- Error messages name the failed step, the received answer bytes, the template and packet size.
+- Simulator and docs use the template size observed on real R503 modules (1536 bytes).
+
 ## [0.1.0] - 2026-11-07
 
 ### Added

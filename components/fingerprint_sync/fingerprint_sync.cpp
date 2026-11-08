@@ -266,6 +266,9 @@ void FingerprintSyncComponent::run_next_job_() {
       this->save_queued_ = false;
       this->job_save_meta_();
       break;
+    case JobType::SELF_TEST:
+      this->job_self_test_(job);
+      break;
   }
   if (!job.data.empty())
     crypto::wipe(job.data.data(), job.data.size());
@@ -294,10 +297,20 @@ void FingerprintSyncComponent::finish_indexing_if_done_() {
 
 void FingerprintSyncComponent::job_refresh_index_() {
   if (!this->params_loaded_) {
-    GrowParams params;
+    // Read the parameters twice and only accept identical, plausible answers: a module that
+    // is still busy with an earlier transfer must never shrink the managed slot range.
+    GrowParams params, again;
     uint8_t res = this->link_.read_params(params);
-    if (res != GROW_OK) {
-      ESP_LOGW(TAG, "Reading sensor parameters failed (0x%02X), retrying later", res);
+    uint8_t raw[16];
+    memcpy(raw, this->link_.last_params_raw(), sizeof(raw));
+    if (res == GROW_OK)
+      res = this->link_.read_params(again);
+    bool consistent = res == GROW_OK && memcmp(raw, this->link_.last_params_raw(), sizeof(raw)) == 0;
+    char raw_hex[format_hex_pretty_size(sizeof(raw))];
+    ESP_LOGD(TAG, "ReadSysPara raw: %s", format_hex_pretty_to(raw_hex, raw, sizeof(raw)));
+    if (!consistent || params.capacity == 0 || params.capacity > 3000 || params.security_level < 1 ||
+        params.security_level > 5) {
+      ESP_LOGW(TAG, "Sensor parameters unreliable (0x%02X, capacity %u), retrying later", res, params.capacity);
       this->error_count_++;
       this->retry_ms_ = millis();
       this->publish_diagnostics_();
@@ -664,6 +677,60 @@ void FingerprintSyncComponent::job_count_() {
   uint16_t count = 0;
   if (this->link_.template_count(count) == GROW_OK && this->count_sensor_ != nullptr)
     this->count_sensor_->publish_state(count);
+}
+
+void FingerprintSyncComponent::self_test(uint16_t slot) {
+  ESP_LOGI(TAG, "Self test on slot %u queued (only sensor buffers are used, no slot is written)", slot);
+  for (uint8_t variant = 1; variant <= 4; variant++) {
+    Job job;
+    job.type = JobType::SELF_TEST;
+    job.slot = slot;
+    job.flags = variant;
+    this->queue_job_(std::move(job));
+  }
+}
+
+void FingerprintSyncComponent::job_self_test_(Job &job) {
+  const uint16_t slot = job.slot;
+  const uint8_t variant = job.flags;
+  auto report = [this, variant](const char *step, uint8_t res) {
+    ESP_LOGI(TAG, "SELF TEST %u: %-28s -> 0x%02X (%u answer bytes)", variant, step, res,
+             (unsigned) this->link_.last_rx_bytes());
+  };
+  uint16_t score = 0;
+  uint8_t res;
+  if (variant == 1) {
+    // Match without any download: is Match supported and how fast?
+    res = this->link_.load_char(1, slot);
+    report("LoadChar buffer 1", res);
+    res = this->link_.load_char(2, slot);
+    report("LoadChar buffer 2", res);
+    uint32_t start = millis();
+    res = this->link_.match(score, 5000);
+    report("Match (no download)", res);
+    ESP_LOGI(TAG, "SELF TEST 1: match score %u after %" PRIu32 " ms", score, millis() - start);
+    return;
+  }
+  // Variants 2-4: round trip of the slot's own template through the host.
+  static const uint8_t GAPS[] = {0, 0, 0, 10, 40};
+  const uint8_t gap = GAPS[variant];
+  std::vector<uint8_t> data;
+  res = this->link_.read_template(slot, data, 1);
+  report("LoadChar+UpChar buffer 1", res);
+  if (res != GROW_OK)
+    return;
+  ESP_LOGI(TAG, "SELF TEST %u: template %u bytes, packet size %u, packet gap %u ms", variant,
+           (unsigned) data.size(), this->link_.packet_size(), gap);
+  res = this->link_.down_char(2, data, gap, 300);
+  report("DownChar buffer 2", res);
+  crypto::wipe(data.data(), data.size());
+  bool alive = this->link_.ping();
+  report(alive ? "ping after download: answers" : "ping after download: SILENT", alive ? GROW_OK : GROW_TIMEOUT);
+  uint32_t start = millis();
+  res = this->link_.match(score, 5000);
+  report("Match buffer 1 vs 2", res);
+  ESP_LOGI(TAG, "SELF TEST %u: match score %u after %" PRIu32 " ms%s", variant, score, millis() - start,
+           variant == 4 ? " -- self test finished" : "");
 }
 
 void FingerprintSyncComponent::job_save_meta_() {

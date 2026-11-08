@@ -166,6 +166,7 @@ uint8_t GrowLink::read_params(GrowParams &params) {
     return res;
   if (ack.size() < 17)
     return GROW_BAD_PACKET;
+  memcpy(this->last_params_raw_, ack.data() + 1, 16);
   auto word = [&ack](size_t index) -> uint16_t {
     return ((uint16_t) ack[1 + 2 * index] << 8) | ack[2 + 2 * index];
   };
@@ -249,6 +250,10 @@ uint8_t GrowLink::up_char(uint8_t buffer, std::vector<uint8_t> &out) {
 }
 
 uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data) {
+  return this->down_char(buffer, data, this->packet_gap_ms_, 50);
+}
+
+uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data, uint8_t gap_ms, uint16_t settle_ms) {
   if (data.empty() || data.size() > MAX_TEMPLATE_SIZE)
     return GROW_BAD_PACKET;
   const uint8_t cmd[] = {CMD_DOWN_CHAR, buffer};
@@ -259,16 +264,49 @@ uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data) {
   this->last_step_ = "DownChar data";
   this->last_template_size_ = data.size();
   size_t pos = 0;
+  size_t packets = 0;
   const size_t chunk = this->packet_size_;
   while (pos < data.size()) {
     size_t n = data.size() - pos < chunk ? data.size() - pos : chunk;
     bool last = (pos + n) >= data.size();
     this->send_packet_(last ? PID_END_DATA : PID_DATA, data.data() + pos, n);
     pos += n;
+    packets++;
+    if (gap_ms > 0) {
+      // Let the module digest each packet; some firmware has small receive buffers.
+      this->uart_->flush();
+      delay(gap_ms);
+    }
     App.feed_wdt();
   }
   this->uart_->flush();
+  // Watch the line: a module that acknowledges the data phase (not documented in the
+  // R503 manual) shows up here instead of confusing the next command.
+  const uint32_t until = millis() + settle_ms;
+  std::vector<uint8_t> payload;
+  while ((int32_t) (millis() - until) < 0) {
+    if (this->uart_->available() == 0) {
+      delay(1);
+      continue;
+    }
+    uint8_t pid;
+    uint8_t r = this->receive_packet_(pid, payload, until - millis() + 20);
+    if (r == GROW_OK) {
+      ESP_LOGD(TAG, "Module sent a packet after DownChar data: pid 0x%02X, %u bytes, first byte 0x%02X", pid,
+               (unsigned) payload.size(), payload.empty() ? 0 : payload[0]);
+    } else {
+      ESP_LOGD(TAG, "Module sent %u unparsable bytes after DownChar data", (unsigned) this->last_rx_bytes_);
+      break;
+    }
+  }
+  ESP_LOGV(TAG, "DownChar: %u bytes in %u packets of %u", (unsigned) data.size(), (unsigned) packets,
+           (unsigned) chunk);
   return GROW_OK;
+}
+
+bool GrowLink::ping() {
+  uint16_t count;
+  return this->template_count(count) == GROW_OK;
 }
 
 uint8_t GrowLink::store(uint8_t buffer, uint16_t slot) {
@@ -284,10 +322,10 @@ uint8_t GrowLink::delete_char(uint16_t slot, uint16_t count) {
   return this->command_(cmd, sizeof(cmd), ack, 2000);
 }
 
-uint8_t GrowLink::match(uint16_t &score) {
+uint8_t GrowLink::match(uint16_t &score, uint32_t timeout_ms) {
   const uint8_t cmd[] = {CMD_MATCH};
   std::vector<uint8_t> ack;
-  uint8_t res = this->command_(cmd, sizeof(cmd), ack);
+  uint8_t res = this->command_(cmd, sizeof(cmd), ack, timeout_ms);
   score = ack.size() >= 3 ? (((uint16_t) ack[1] << 8) | ack[2]) : 0;
   return res;
 }
