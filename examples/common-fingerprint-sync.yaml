@@ -47,18 +47,12 @@ fingerprint_sync:
   fingerprint_capacity_sensor: fingerprint_capacity
   # Admin fingers (protected): 2 touches = enroll next free slot, 3 touches + finger = delete
   # that finger everywhere, 4 touches + finger = re-enroll it, 5 touches = enroll a guest,
-  # hold 3 s = status (on_admin_hold).
+  # hold 3 s = status (on_admin_hold). These are the defaults; `admin:` alone means slot 0.
   admin:
     slots: [0, 1]
-    enroll_touches: 2
-    delete_touches: 3
-    reenroll_touches: 4
-    guest_touches: 5
-    num_scans: 3
-  # Guest fingers are deleted on all nodes when they expire (needs time_id).
-  guests:
-    slots: "150-179"
-    valid_for: 7d
+  # Guest fingers (valid 7 days by default) are deleted on all nodes when they expire
+  # (needs time_id).
+  guests: "150-179"
   time_id: sntp_time
   on_admin_hold:
     # Status colour: green = in sync, blue = syncing, yellow = conflict, red = error.

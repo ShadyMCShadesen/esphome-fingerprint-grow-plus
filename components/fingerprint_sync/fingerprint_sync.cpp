@@ -319,6 +319,7 @@ void FingerprintSyncComponent::finish_indexing_if_done_() {
   if (this->ready_ || !this->params_loaded_ || this->pending_hash_ != 0 || this->refresh_queued_)
     return;
   this->ready_ = true;
+  this->indexed_once_ = true;
   uint16_t present = 0;
   for (uint16_t s = 0; s < this->capacity_; s++)
     present += (this->managed_(s) && meta_present(this->meta_[s])) ? 1 : 0;
@@ -702,7 +703,7 @@ void FingerprintSyncComponent::self_test(uint16_t slot, uint16_t compare_slot) {
 }
 
 void FingerprintSyncComponent::claim_all_slots() {
-  if (!this->ready_) {
+  if (!this->indexed_once_) {
     ESP_LOGW(TAG, "claim_all_slots refused: index not ready yet");
     return;
   }
@@ -861,7 +862,7 @@ int32_t FingerprintSyncComponent::next_free_slot() const {
 }
 
 void FingerprintSyncComponent::enroll_next_free(uint8_t num_scans) {
-  if (!this->ready_) {
+  if (!this->indexed_once_) {
     ESP_LOGW(TAG, "Enrollment refused: index not ready yet");
     return;
   }
@@ -1448,7 +1449,8 @@ void FingerprintSyncComponent::run_round_() {
     this->round_reachable_ = 0;
     this->round_failures_ = 0;
     this->round_last_error_.clear();
-    std::fill(this->remote_present_.begin(), this->remote_present_.end(), false);
+    // remote_present_ is deliberately kept across rounds: clearing it here would let
+    // enroll_next_free pick a slot that a peer holds until that peer's manifest arrives.
     // Conflicts are re-evaluated every round; resolved ones disappear on their own.
     std::fill(this->conflict_.begin(), this->conflict_.end(), false);
     this->set_status_("syncing");

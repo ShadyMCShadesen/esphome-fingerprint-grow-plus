@@ -143,16 +143,22 @@ def _validate_admin(config):
         config[CONF_ENROLL_TOUCHES] = config.pop(CONF_TOUCHES)
     config.setdefault(CONF_ENROLL_TOUCHES, 2)
     used = [
-        config[k]
+        config.get(k, 0)
         for k in (CONF_ENROLL_TOUCHES, CONF_DELETE_TOUCHES, CONF_REENROLL_TOUCHES, CONF_GUEST_TOUCHES)
-        if config[k] > 0
+        if config.get(k, 0) > 0
     ]
     if len(used) != len(set(used)):
         raise cv.Invalid("every admin gesture needs its own number of touches (0 = disabled)")
     return config
 
 
+def _empty_dict_if_none(value):
+    # `admin:` without options (or `admin: true`) enables the admin finger with all defaults.
+    return {} if value is None or value is True else value
+
+
 ADMIN_SCHEMA = cv.All(
+    _empty_dict_if_none,
     cv.Schema(
         {
             cv.Optional(CONF_SLOT): cv.uint16_t,
@@ -161,7 +167,8 @@ ADMIN_SCHEMA = cv.All(
             cv.Optional(CONF_ENROLL_TOUCHES): _TOUCHES,
             cv.Optional(CONF_DELETE_TOUCHES, default=3): _TOUCHES,
             cv.Optional(CONF_REENROLL_TOUCHES, default=4): _TOUCHES,
-            cv.Optional(CONF_GUEST_TOUCHES, default=0): _TOUCHES,
+            # Default: 5 when guests are configured, otherwise off.
+            cv.Optional(CONF_GUEST_TOUCHES): _TOUCHES,
             # Pause after the last touch that completes a gesture.
             cv.Optional(CONF_WINDOW, default="2s"): cv.positive_time_period_milliseconds,
             # Keep the admin finger on the sensor this long for on_admin_hold (needs finger_sensor).
@@ -174,11 +181,12 @@ ADMIN_SCHEMA = cv.All(
     _validate_admin,
 )
 
-GUESTS_SCHEMA = cv.Schema(
+GUESTS_SCHEMA = cv.maybe_simple_value(
     {
         cv.Required(CONF_SLOTS): validate_slot_range,
         cv.Optional(CONF_VALID_FOR, default="7d"): cv.positive_time_period_seconds,
-    }
+    },
+    key=CONF_SLOTS,
 )
 
 
@@ -192,6 +200,12 @@ def _default_metadata_storage(config):
 
 
 def _validate(config):
+    if CONF_ADMIN in config and CONF_GUEST_TOUCHES not in config[CONF_ADMIN]:
+        config = dict(config)
+        admin = dict(config[CONF_ADMIN])
+        taken = {admin[k] for k in (CONF_ENROLL_TOUCHES, CONF_DELETE_TOUCHES, CONF_REENROLL_TOUCHES)}
+        admin[CONF_GUEST_TOUCHES] = 5 if CONF_GUESTS in config and 5 not in taken else 0
+        config[CONF_ADMIN] = admin
     if guests := config.get(CONF_GUESTS):
         low, high = guests[CONF_SLOTS]
         if CONF_TIME_ID not in config:

@@ -16,9 +16,17 @@ versioning: [Semantic Versioning](https://semver.org/).
 - Guest fingers with an expiry date (`guests:`, `enroll_guest`, `extend_guest`); the expiry is
   synced and enforced by every node with a valid time.
 
+### Fixed
+- `enroll_next_free`, `claim_all_slots`, admin gestures and guest expiry no longer wait for a
+  finished sync round after boot; one complete local index is enough.
+- Peer slot knowledge is kept between rounds, so an unreachable peer no longer makes its slots
+  look free to `enroll_next_free`.
+
 ### Changed
 - **Protocol version 2** (expiry in MANIFEST, TEMPLATE, RESTORE). Update all nodes and
   `tools/fpsync.py` together; version 1 and 2 nodes refuse each other.
+- Simpler configuration: `admin:` without options (admin slot 0, all defaults),
+  `guests: "150-179"` shorthand, `guest_touches` defaults to 5 when guests are configured.
 - Admin gestures are evaluated after a pause (`window`, default 2 s) instead of acting on the
   last touch; `admin: touches` is now `enroll_touches` (old name still accepted).
 

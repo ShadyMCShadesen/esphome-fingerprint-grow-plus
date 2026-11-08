@@ -367,6 +367,8 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   uint32_t boot_ms_{0};
   bool params_loaded_{false};
   bool ready_{false};
+  /// The index has been read at least once (ready_ drops briefly while a round re-reads it).
+  bool indexed_once_{false};
   bool failed_sensor_{false};
   uint16_t capacity_{0};
   uint16_t clock_{0};

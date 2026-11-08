@@ -68,10 +68,9 @@ gewollt, denn es wird nie geraten.
 
 - **Taster:** `fingerprint_sync.enroll_next_free` im `on_press` eines GPIO-Binary-Sensors.
 - **Weboberfläche:** Template-Buttons im `web_server` (siehe `examples/common-fingerprint-sync.yaml`).
-- **Admin-Finger:** Slot 0 zweimal innerhalb von 5 s auflegen. Danach wird der nächste freie Slot
-  eingelernt. Der Admin-Finger darf keine normalen Aktionen auslösen: In
-  `on_finger_scan_matched` den Slot 0 ausschließen (`finger_id != 0`). Für LED-Feedback nach dem
-  ersten Auflegen gibt es den Trigger `on_admin_touch`.
+- **Admin-Finger:** mit `admin:` (ohne Optionen: Slot 0) den Admin-Finger zweimal auflegen und
+  kurz warten. Danach wird der nächste freie Slot eingelernt. Für LED-Feedback gibt es den
+  Trigger `on_admin_touch`, siehe unten.
 
 ## Admin-Finger
 
@@ -92,8 +91,8 @@ lässt sie stehen. Entfernen nur mit `fingerprint_sync.delete_admin` und Code. I
 
 ## Gästefinger
 
-Mit `guests: slots: "150-179"` und `time_id` lernt `fingerprint_sync.enroll_guest` einen Finger
-mit Ablaufdatum ein (Standard `valid_for: 7d`). Das Datum wird an alle Stationen übertragen;
+Mit `guests: "150-179"` und `time_id` lernt `fingerprint_sync.enroll_guest` (oder die
+Admin-Geste 5×) einen Finger mit Ablaufdatum ein (Standard `valid_for: 7d`). Das Datum wird an alle Stationen übertragen;
 nach Ablauf wird der Finger überall gelöscht. `fingerprint_sync.extend_guest` verlängert.
 
 **Protokoll Version 2:** Diese Version spricht nicht mit älteren Ständen. Alle Stationen gemeinsam

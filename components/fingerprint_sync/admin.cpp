@@ -132,7 +132,7 @@ void FingerprintSyncComponent::run_gesture_(uint8_t touches) {
 }
 
 void FingerprintSyncComponent::arm_(AdminArm action) {
-  if (!this->ready_) {
+  if (!this->indexed_once_) {
     ESP_LOGW(TAG, "Admin action refused: index not ready yet");
     return;
   }
@@ -218,7 +218,7 @@ void FingerprintSyncComponent::enroll_guest(uint8_t num_scans, uint32_t valid_s)
     ESP_LOGW(TAG, "Guest enrollment refused: the time is not known yet");
     return;
   }
-  if (!this->ready_ || this->enrolling_) {
+  if (!this->indexed_once_ || this->enrolling_) {
     ESP_LOGW(TAG, "Guest enrollment refused: index not ready or an enrollment is running");
     return;
   }
@@ -262,7 +262,7 @@ void FingerprintSyncComponent::set_expiry_(uint16_t slot, uint32_t expires) {
 
 void FingerprintSyncComponent::guest_expiry_loop_() {
   const uint32_t now_ms = millis();
-  if (!this->ready_ || !elapsed(now_ms, this->last_expiry_check_ms_, EXPIRY_CHECK_INTERVAL_MS))
+  if (!this->indexed_once_ || !elapsed(now_ms, this->last_expiry_check_ms_, EXPIRY_CHECK_INTERVAL_MS))
     return;
   this->last_expiry_check_ms_ = now_ms;
   uint32_t now;
