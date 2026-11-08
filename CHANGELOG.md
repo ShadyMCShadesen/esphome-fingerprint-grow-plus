@@ -13,11 +13,14 @@ versioning: [Semantic Versioning](https://semver.org/).
 - `self_test` option `compare_slot` to score two different slots.
 
 ### Changed
-- A template the module matches as the same finger is no longer overwritten; both templates are
-  kept. Real R503 modules report *no match* even for identical templates (score 92), so the match
-  result is only a hint. Conflict messages include the score.
-- `DownChar` pauses 10 ms between data packets by default: without a pause a real R503 received a
-  corrupted template.
+- The module's template-to-template `Match` is no longer used: on real R503 modules it returns
+  arbitrary results. Different templates in the same slot are always a conflict; written slots
+  are verified by reading them back byte for byte.
+- `self_test` checks whether a template survives the round trip sensor → ESP → sensor
+  byte-identically.
+- `DownChar` pauses 10 ms between data packets by default.
+- New option `fingerprint_capacity_sensor`: the synced slot range follows fingerprint_grow's
+  capacity; a capacity below the number of stored templates is rejected.
 
 ### Fixed
 - Sensor parameters are read twice and checked for plausibility; an inconsistent answer (seen as

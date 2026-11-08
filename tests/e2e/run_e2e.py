@@ -70,6 +70,9 @@ sensor:
     fingerprint_count:
       name: Fingerprint Count
       id: fp_count
+    capacity:
+      name: Fingerprint Capacity
+      id: fp_capacity
   - platform: fingerprint_sync
     peers_reachable:
       name: Peers reachable
@@ -90,6 +93,7 @@ fingerprint_sync:
   dry_run: {dry_run}
   startup_delay: 2s
   fingerprint_count_sensor: fp_count
+  fingerprint_capacity_sensor: fp_capacity
   delete_all_code: TEST_ALL
   admin:
     slot: 0
@@ -291,8 +295,8 @@ def main():
             90))
         sha_a, sha_b = c.sha("node-a", 2), c.sha("node-b", 2)
         results.append(wait_until(
-            "slot 2 (bob, enrolled separately on A and B) recognised as the same finger, nothing overwritten",
-            lambda: "Slot 2 holds the same finger as on the peer" in c.log("node-a") + c.log("node-b")
+            "slot 2 (bob, enrolled separately on A and B): conflict reported on both, nothing overwritten",
+            lambda: "CONFLICT in slot 2" in c.log("node-a") and "CONFLICT in slot 2" in c.log("node-b")
             and c.sha("node-a", 2) == sha_a and c.sha("node-b", 2) == sha_b and sha_a != sha_b, 60))
         results.append(wait_until(
             "slot 2 on C (dave) was NOT overwritten and a conflict was reported",
@@ -313,15 +317,18 @@ def main():
         print("== Scenario 1b: sensor self test (buffers only)")
         c.cmd("node-a", "self_test 0 1")
         results.append(wait_until(
-            "self test: Match works without and after a download round trip",
+            "self test: template round trip through the host is byte-identical",
             lambda: "SELF TEST 1: Match (no download)" in c.log("node-a")
-            and len(re.findall(r"Match buffer 1 vs 2\s+-> 0x00", c.log("node-a"))) == 3
+            and len(re.findall(r"round trip BYTE-IDENTICAL", c.log("node-a"))) == 3
             and "SELF TEST 5: slot 0 vs slot 1" in c.log("node-a")
             and "-- self test finished" in c.log("node-a"), 60))
 
-        print("== Scenario 2: resolve all conflicts on C by taking the peers' fingers")
-        c.cmd("node-c", "resolve_all 0")
-        results.append(wait_until("C slot 2 becomes bob", lambda: c.slots("node-c").get(2) == "bob", 60))
+        print("== Scenario 2: node A becomes the reference (resolve_all_conflicts keep_local)")
+        c.cmd("node-a", "resolve_all 1")
+        results.append(wait_until(
+            "B and C replaced slot 2 with A's template (C's dave is gone, B holds A's exact bytes)",
+            lambda: c.slots("node-c").get(2) == "bob" and c.sha("node-c", 2) == sha_a
+            and c.sha("node-b", 2) == sha_a, 60))
 
         print("== Scenario 3: admin finger enrolls the next free slot on A, propagates")
         time.sleep(2)

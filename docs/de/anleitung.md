@@ -53,8 +53,8 @@ nicht benötigt.
 ## Erstinbetriebnahme mit bereits eingelernten Fingern
 
 Getrennt eingelernte Templates unterscheiden sich in den Bytes. Der R503 kann zwei gespeicherte
-Templates nicht zuverlässig als „gleicher Finger“ erkennen (selbst eine identische Kopie ergibt
-„kein Treffer“). Deshalb meldet der Sync bei bestehenden Anlagen zunächst **Konflikte**. Das ist
+Templates nicht zuverlässig als „gleicher Finger“ erkennen (sein Vergleichsbefehl liefert
+zufällige Ergebnisse). Deshalb meldet der Sync bei bestehenden Anlagen zunächst **Konflikte**. Das ist
 gewollt, denn es wird nie geraten.
 
 1. Von jedem Sensor ein Backup ziehen (siehe unten).

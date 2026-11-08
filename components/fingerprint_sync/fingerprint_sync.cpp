@@ -252,9 +252,6 @@ void FingerprintSyncComponent::run_next_job_() {
     case JobType::WRITE:
       this->job_write_(job);
       break;
-    case JobType::COMPARE:
-      this->job_compare_(job);
-      break;
     case JobType::DELETE:
       this->job_delete_(job);
       break;
@@ -316,7 +313,28 @@ void FingerprintSyncComponent::job_refresh_index_() {
       this->publish_diagnostics_();
       return;
     }
-    uint16_t capacity = std::min<uint16_t>(params.capacity, MAX_CAPACITY);
+    uint16_t count = 0;
+    if (this->link_.template_count(count) != GROW_OK)
+      count = 0;
+    uint16_t sensor_capacity = params.capacity;
+    if (this->capacity_sensor_ != nullptr && this->capacity_sensor_->has_state() &&
+        this->capacity_sensor_->state >= 1 && this->capacity_sensor_->state <= 3000) {
+      // fingerprint_grow searches slots 0..capacity-1 with the value it read at boot; use the
+      // same range so every slot that can match is synced.
+      uint16_t grow_capacity = (uint16_t) this->capacity_sensor_->state;
+      if (grow_capacity != params.capacity)
+        ESP_LOGW(TAG, "ReadSysPara reports capacity %u, fingerprint_grow uses %u; using %u", params.capacity,
+                 grow_capacity, grow_capacity);
+      sensor_capacity = grow_capacity;
+    }
+    if (sensor_capacity < count) {
+      ESP_LOGW(TAG, "Capacity %u is below the %u stored templates; retrying later", sensor_capacity, count);
+      this->error_count_++;
+      this->retry_ms_ = millis();
+      this->publish_diagnostics_();
+      return;
+    }
+    uint16_t capacity = std::min<uint16_t>(sensor_capacity, MAX_CAPACITY);
     if (capacity > this->storage_->max_slots()) {
       ESP_LOGW(TAG, "Metadata storage (%s) holds %u slots only; slots above are not synced", this->storage_->name(),
                (unsigned) this->storage_->max_slots());
@@ -330,8 +348,6 @@ void FingerprintSyncComponent::job_refresh_index_() {
     this->remote_present_.assign(capacity, false);
     this->conflict_.assign(capacity, false);
     this->conflict_reported_.assign(capacity, false);
-    this->equivalent_.assign(capacity, {});
-    this->equivalent_known_.assign(capacity, false);
     if (!this->storage_->load(this->meta_)) {
       ESP_LOGW(TAG, "Loading sync metadata failed, retrying later");
       this->error_count_++;
@@ -341,8 +357,8 @@ void FingerprintSyncComponent::job_refresh_index_() {
     for (uint16_t m : this->meta_)
       this->clock_ = std::max(this->clock_, meta_version(m));
     this->params_loaded_ = true;
-    ESP_LOGI(TAG, "Sensor: capacity %u, security level %u, packet size %u bytes", params.capacity,
-             params.security_level, params.packet_size);
+    ESP_LOGI(TAG, "Sensor: capacity %u (ReadSysPara %u), %u templates, security level %u, packet size %u bytes",
+             capacity, params.capacity, count, params.security_level, params.packet_size);
   }
 
   const uint8_t pages = (uint8_t) ((this->capacity_ + 255) / 256);
@@ -482,21 +498,17 @@ bool FingerprintSyncComponent::store_verified_(uint8_t buffer, uint16_t slot, co
              (unsigned) this->link_.last_rx_bytes());
     return false;
   }
-  // Verification: read back and compare. If the module re-encodes the template, fall back to
-  // the module's own 1:1 match between the read back template and the original.
+  // Verification: read the stored slot back and compare it byte for byte with what was sent.
   const uint8_t other = buffer == 1 ? 2 : 1;
   std::vector<uint8_t> readback;
   res = this->link_.read_template(slot, readback, other);
   bool ok = false;
   if (res == GROW_OK) {
     ok = readback.size() == data.size() && crypto::equal_ct(readback.data(), data.data(), data.size());
+    if (!ok)
+      ESP_LOGW(TAG, "Slot %u read back differs from the template sent (%u vs %u bytes)", slot,
+               (unsigned) readback.size(), (unsigned) data.size());
     crypto::wipe(readback.data(), readback.size());
-    if (!ok) {
-      uint16_t score = 0;
-      ok = this->link_.match(score) == GROW_OK;
-      ESP_LOGD(TAG, "Slot %u read back differs bytewise; module match %s (score %u)", slot, ok ? "ok" : "FAILED",
-               score);
-    }
   }
   if (!ok) {
     ESP_LOGE(TAG, "Verification of slot %u failed; removing the unverified template", slot);
@@ -506,7 +518,6 @@ bool FingerprintSyncComponent::store_verified_(uint8_t buffer, uint16_t slot, co
 }
 
 void FingerprintSyncComponent::apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash) {
-  this->equivalent_known_[slot] = false;
   this->meta_[slot] = meta;
   memcpy(this->hash_[slot].data(), hash, HASH_SIZE);
   this->hash_known_[slot] = true;
@@ -567,58 +578,15 @@ void FingerprintSyncComponent::job_write_(Job &job) {
     this->send_simple_(*s, MSG_RESTORE_ACK, slot, ok ? 0 : 1, true);
 }
 
-void FingerprintSyncComponent::job_compare_(Job &job) {
-  Session *s = this->session_by_gen_(job.session);
-  if (s != nullptr && s->jobs_pending > 0)
-    s->jobs_pending--;
-  const uint16_t slot = job.slot;
-  if (!meta_present(this->meta_[slot]) || !this->hash_known_[slot])
-    return;  // local state changed meanwhile; the next round decides again
-
-  uint8_t res = this->link_.load_char(1, slot);
-  if (res == GROW_OK)
-    res = this->link_.down_char(2, job.data);
-  uint16_t score = 0;
-  if (res == GROW_OK)
-    res = this->link_.match(score);
-
-  if (res == GROW_NO_MATCH) {
-    this->flag_conflict_(slot, score);
-    return;
-  }
-  if (res != GROW_OK) {
-    ESP_LOGW(TAG, "Comparing slot %u failed at %s (0x%02X, %u answer bytes, template %u bytes, packet size %u)",
-             slot, this->link_.last_step(), res, (unsigned) this->link_.last_rx_bytes(), (unsigned) job.data.size(),
-             this->link_.packet_size());
-    this->error_count_++;
-    this->publish_diagnostics_();
-    return;
-  }
-
-  // The module reports the same finger with different template bytes (e.g. enrolled separately
-  // on two nodes). Nothing is overwritten: the module's template-to-template match is not
-  // reliable enough to justify replacing a stored finger. Both templates are kept, the pair is
-  // remembered as equivalent and the higher version is adopted so the slot stops being compared.
-  const uint16_t local = this->meta_[slot];
-  const uint16_t version = std::max(meta_version(local), meta_version(job.meta));
-  if (version != meta_version(local)) {
-    this->meta_[slot] = meta_pack(meta_state(local), version);
-    this->mark_dirty_();
-  }
-  this->equivalent_[slot] = job.hash;
-  this->equivalent_known_[slot] = true;
-  ESP_LOGI(TAG, "Slot %u holds the same finger as on the peer (score %u); both templates are kept", slot, score);
-}
-
-void FingerprintSyncComponent::flag_conflict_(uint16_t slot, uint16_t score) {
+void FingerprintSyncComponent::flag_conflict_(uint16_t slot) {
   if (this->conflict_[slot])
     return;
   this->conflict_[slot] = true;
   if (this->conflict_reported_[slot])
     return;  // still the same conflict as in the previous round
   this->conflict_reported_[slot] = true;
-  ESP_LOGW(TAG, "CONFLICT in slot %u: the peer's template differs and the sensor does not report a match "
-           "(score %u). Nothing was overwritten; use fingerprint_sync.resolve_conflict.", slot, score);
+  ESP_LOGW(TAG, "CONFLICT in slot %u: a peer stores a different template in this slot. Nothing was "
+           "overwritten; use fingerprint_sync.resolve_conflict or resolve_all_conflicts.", slot);
   this->conflict_cb_.call(slot);
   this->publish_diagnostics_();
 }
@@ -736,14 +704,19 @@ void FingerprintSyncComponent::job_self_test_(Job &job) {
            (unsigned) data.size(), this->link_.packet_size(), gap);
   res = this->link_.down_char(2, data, gap, 300);
   report("DownChar buffer 2", res);
+  std::vector<uint8_t> back;
+  res = this->link_.up_char(2, back);
+  report("UpChar buffer 2", res);
+  size_t diff = 0;
+  for (size_t i = 0; i < data.size() && i < back.size(); i++)
+    diff += data[i] != back[i] ? 1 : 0;
+  bool identical = res == GROW_OK && back.size() == data.size() && diff == 0;
+  ESP_LOGI(TAG, "SELF TEST %u: round trip %s (%u of %u bytes differ, %u bytes back)%s", variant,
+           identical ? "BYTE-IDENTICAL" : "DIFFERENT", (unsigned) diff, (unsigned) data.size(),
+           (unsigned) back.size(), (variant == 4 && job.meta == NO_SLOT) ? " -- self test finished" : "");
   crypto::wipe(data.data(), data.size());
-  bool alive = this->link_.ping();
-  report(alive ? "ping after download: answers" : "ping after download: SILENT", alive ? GROW_OK : GROW_TIMEOUT);
-  uint32_t start = millis();
-  res = this->link_.match(score, 5000);
-  report("Match buffer 1 vs 2", res);
-  ESP_LOGI(TAG, "SELF TEST %u: match score %u after %" PRIu32 " ms%s", variant, score, millis() - start,
-           (variant == 4 && job.meta == NO_SLOT) ? " -- self test finished" : "");
+  if (!back.empty())
+    crypto::wipe(back.data(), back.size());
 }
 
 void FingerprintSyncComponent::job_save_meta_() {
@@ -916,8 +889,7 @@ FingerprintSyncComponent::Decision FingerprintSyncComponent::decide_(uint16_t sl
   // Both present.
   if (!this->hash_known_[slot])
     return d;
-  if (memcmp(this->hash_[slot].data(), remote_hash, HASH_SIZE) == 0 ||
-      (this->equivalent_known_[slot] && memcmp(this->equivalent_[slot].data(), remote_hash, HASH_SIZE) == 0)) {
+  if (memcmp(this->hash_[slot].data(), remote_hash, HASH_SIZE) == 0) {
     if (rv > lv || (rv == lv && meta_forced(remote) && !meta_forced(local))) {
       d.kind = Decision::ADOPT;
       d.meta = remote;
@@ -932,7 +904,10 @@ FingerprintSyncComponent::Decision FingerprintSyncComponent::decide_(uint16_t sl
   }
   if (meta_forced(local) && lv > rv)
     return d;  // our replacement wins; the peer pulls it
-  d.kind = Decision::PULL;  // compare with the module's 1:1 match
+  // Different template bytes in the same slot. Whether both belong to the same finger cannot be
+  // decided reliably (the module's template-to-template Match returns arbitrary results on real
+  // R503 modules), so this is always a conflict that the user resolves.
+  d.kind = Decision::CONFLICT;
   return d;
 }
 
@@ -961,6 +936,9 @@ void FingerprintSyncComponent::process_manifest_entry_(Session &s, uint16_t slot
       this->queue_job_(std::move(job));
       break;
     }
+    case Decision::CONFLICT:
+      this->flag_conflict_(slot);
+      break;
     case Decision::NOTHING:
       break;
   }
@@ -996,9 +974,11 @@ void FingerprintSyncComponent::handle_template_(Session &s, uint16_t slot, uint1
   } else if (meta_forced(meta) && meta_version(meta) > meta_version(local)) {
     job.type = JobType::WRITE;
     job.flags = JOB_FLAG_REPLACE;
-    ESP_LOGW(TAG, "Slot %u is being replaced by a deliberate re-enrollment on a peer", slot);
+    ESP_LOGW(TAG, "Slot %u is replaced by the peer's forced version (resolve_conflict, restore or re-enrollment)",
+             slot);
   } else {
-    job.type = JobType::COMPARE;
+    this->flag_conflict_(slot);
+    return;
   }
   s.jobs_pending++;
   this->queue_job_(std::move(job));

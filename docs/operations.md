@@ -72,7 +72,7 @@ Install the new sensor and reboot the node. Its index is empty, which the sync t
 | `Verification of slot X failed` | sensor stored something else than sent | check wiring/power; compatibility test A1 |
 | `Template bytes of slot X changed since indexing` | sensor returns different bytes for the same slot (assumption A2 false) | harmless; the sync falls back to the sensor's own match |
 | `Connection lost: 0` (warning from the TCP helper) | peer closed the connection after a finished session | harmless |
-| `Comparing slot X failed at Match (0xFF, 0 answer bytes …)` | the module does not answer after a template download | run `fingerprint_sync.self_test` and report the `SELF TEST` lines |
+| `Verification of slot X failed` right after a sync write | the template did not arrive byte-identical | run `fingerprint_sync.self_test`; the `round trip` lines show whether transfers are lossless |
 | `Sensor parameters unreliable` | two `ReadSysPara` answers differed or were implausible | retried automatically; power-cycle the sensor if it persists |
 | status `sensor error` | `fingerprint_grow` failed / sensor not answering | check sensor, power, UART |
 | sync never runs | enrollment still active (a started enrollment blocks the sensor buffers) | finish or cancel the enrollment |

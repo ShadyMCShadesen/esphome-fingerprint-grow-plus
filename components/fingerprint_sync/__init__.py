@@ -39,6 +39,7 @@ CONF_METADATA_STORAGE = "metadata_storage"
 CONF_DELETE_ALL_CODE = "delete_all_code"
 CONF_FINGER_SENSOR = "finger_sensor"
 CONF_FINGERPRINT_COUNT_SENSOR = "fingerprint_count_sensor"
+CONF_FINGERPRINT_CAPACITY_SENSOR = "fingerprint_capacity_sensor"
 CONF_SENSOR_ADDRESS = "sensor_address"
 CONF_ADMIN = "admin"
 CONF_TOUCHES = "touches"
@@ -177,6 +178,7 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_FINGER_SENSOR): cv.use_id(binary_sensor.BinarySensor),
             cv.Optional(CONF_FINGERPRINT_COUNT_SENSOR): cv.use_id(sensor.Sensor),
+            cv.Optional(CONF_FINGERPRINT_CAPACITY_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_SENSOR_ADDRESS, default=0xFFFFFFFF): cv.hex_uint32_t,
             cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
             cv.Optional(CONF_ADMIN): ADMIN_SCHEMA,
@@ -267,6 +269,12 @@ async def to_code(config):
         cg.add(
             var.set_fingerprint_count_sensor(
                 await cg.get_variable(config[CONF_FINGERPRINT_COUNT_SENSOR])
+            )
+        )
+    if CONF_FINGERPRINT_CAPACITY_SENSOR in config:
+        cg.add(
+            var.set_fingerprint_capacity_sensor(
+                await cg.get_variable(config[CONF_FINGERPRINT_CAPACITY_SENSOR])
             )
         )
     if CONF_TIME_ID in config:

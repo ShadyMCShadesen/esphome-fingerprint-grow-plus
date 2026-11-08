@@ -50,7 +50,6 @@ enum class JobType : uint8_t {
   HASH,
   SERVE,
   WRITE,
-  COMPARE,
   DELETE,
   COUNT,
   SAVE_META,
@@ -128,6 +127,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   }
   void set_finger_sensor(binary_sensor::BinarySensor *sensor) { this->finger_sensor_ = sensor; }
   void set_fingerprint_count_sensor(sensor::Sensor *sensor) { this->count_sensor_ = sensor; }
+  void set_fingerprint_capacity_sensor(sensor::Sensor *sensor) { this->capacity_sensor_ = sensor; }
 #ifdef USE_SOCKET_IPV4_ALLOW
   void set_allowed_networks(const socket::Ipv4AllowEntry *entries, size_t count) {
     this->transport_.set_allow(entries, count);
@@ -194,7 +194,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
 
  protected:
   struct Decision {
-    enum Kind : uint8_t { NOTHING, PULL, ADOPT, DELETE } kind{NOTHING};
+    enum Kind : uint8_t { NOTHING, PULL, ADOPT, DELETE, CONFLICT } kind{NOTHING};
     uint16_t meta{0};
   };
 
@@ -215,7 +215,6 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void job_hash_(Job &job);
   void job_serve_(Job &job);
   void job_write_(Job &job);
-  void job_compare_(Job &job);
   void job_delete_(Job &job);
   void job_count_();
   void job_save_meta_();
@@ -228,7 +227,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash);
   void handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, const uint8_t *data,
                         size_t len);
-  void flag_conflict_(uint16_t slot, uint16_t score);
+  void flag_conflict_(uint16_t slot);
 
   // sessions
   bool is_self_(const Peer &peer) const;
@@ -263,6 +262,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   uint16_t enroll_to_{0xFFFF};
   binary_sensor::BinarySensor *finger_sensor_{nullptr};
   sensor::Sensor *count_sensor_{nullptr};
+  sensor::Sensor *capacity_sensor_{nullptr};
 #ifdef USE_TIME
   time::RealTimeClock *time_{nullptr};
 #endif
@@ -297,9 +297,6 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   std::vector<bool> remote_present_;
   std::vector<bool> conflict_;
   std::vector<bool> conflict_reported_;
-  /// Remote template hash the module matched as the same finger (kept side by side, RAM only).
-  std::vector<std::array<uint8_t, HASH_SIZE>> equivalent_;
-  std::vector<bool> equivalent_known_;
   std::deque<Job> jobs_;
   uint16_t pending_hash_{0};
   bool refresh_queued_{false};

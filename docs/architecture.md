@@ -79,21 +79,17 @@ Decision for one slot, local `L`, remote `R`:
 | present | present, same hash | adopt the higher version (metadata only) |
 | present | present, different hash, R forced & newer | pull and **replace** (deliberate re-enrollment) |
 | present | present, different hash, L forced & newer | nothing (the peer pulls ours) |
-| present | present, different hash, otherwise | pull and **compare** with the module's `Match` |
+| present | present, different hash, otherwise | **conflict** |
 | tombstone | present | delete if `R.version > L.version` |
 | tombstone | none / older tombstone | adopt the tombstone |
 
-**Compare:**
+**Conflict:** nothing is written; `on_conflict(slot)` fires once and the `conflict_count` sensor
+goes up.
 
-- **Module reports a match:** the two templates are treated as the same finger and **both are
-  kept** (no overwrite); the pair is remembered until reboot and the higher version is adopted.
-- **No match:** **conflict**. Nothing is written; `on_conflict(slot)` fires once and the
-  `conflict_count` sensor goes up.
-
-> Observed on real R503 modules: `Match` of a template against an identical copy reports
-> *no match* (score 92 at security level 3). The template-to-template match is therefore treated
-> as a hint only. It never justifies replacing a stored finger, and conflicts on existing
-> installations are expected until they are resolved once.
+> Why no automatic "same finger" detection: on real R503 modules the template-to-template
+> `Match` command returns arbitrary results (an identical copy scored 92 in one run and 0 in the
+> next, two different fingers scored 92). Two templates in one slot can therefore not be judged
+> automatically, and a stored finger is never replaced on a guess.
 
 Resolve a conflict with `resolve_conflict(slot, keep_local)`, or all of them with
 `resolve_all_conflicts(keep_local)`:

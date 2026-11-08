@@ -41,6 +41,7 @@ fingerprint_sync:
   delete_all_code: !secret fingerprint_delete_all_code
   finger_sensor: finger_detected
   fingerprint_count_sensor: fingerprint_count
+  fingerprint_capacity_sensor: fingerprint_capacity
   # Admin finger: touch slot 0 twice within 5 s to enroll a new finger in the next free slot.
   admin:
     slot: 0
@@ -106,6 +107,9 @@ sensor:
     fingerprint_count:
       id: fingerprint_count
       name: Fingerprint count
+    capacity:
+      id: fingerprint_capacity
+      name: Fingerprint capacity
   - platform: fingerprint_sync
     peers_reachable:
       name: Fingerprint sync peers reachable
