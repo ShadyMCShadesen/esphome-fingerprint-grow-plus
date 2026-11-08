@@ -115,6 +115,10 @@ fingerprint_grow_plus:
   guests:
     slots: "100-109"
     valid_for: 25s
+  on_admin_access:
+    - logger.log:
+        format: "TEST-EVENT admin_access %u"
+        args: [finger_id]
   on_admin_gesture:
     - logger.log:
         format: "TEST-EVENT admin_gesture %u"
@@ -206,6 +210,7 @@ class Cluster:
                 tail = "\n".join(l for l in tail.splitlines()
                                   if not l.startswith(("  key:", "  port:", "  peers:")))
                 yaml = head + "\nfingerprint_grow_plus:\n" + tail
+                yaml = yaml.replace("    num_scans: 2\n", "    num_scans: 2\n    access: delayed\n", 1)
             yaml_path = self.path(name, "yaml")
             yaml_path.write_text(yaml, encoding="utf-8")
             print(f"== compiling {name}", flush=True)
@@ -564,6 +569,10 @@ def main():
         results.append(wait_until("stand-alone node reports the network sync as off",
                                   lambda: "Network sync: off" in c.log("node-f"), 5))
         c.touch("node-f", "admin")
+        results.append(wait_until("a single admin touch fires on_admin_access once the gesture is complete",
+                                  lambda: c.log("node-f").count("TEST-EVENT admin_access 0") == 1, 10))
+        time.sleep(1)
+        c.touch("node-f", "admin")
         time.sleep(1.5)
         c.touch("node-f", "admin")
         results.append(wait_until("enrollment started for slot 1 on the stand-alone node",
@@ -572,6 +581,8 @@ def main():
         c.touches("node-f", "zoe", 2, gap=1.5)
         results.append(wait_until("zoe enrolled in slot 1 on the stand-alone node",
                                   lambda: c.slots("node-f").get(1) == "zoe", 30))
+        results.append(wait_until("two admin touches open the menu without access",
+                                  lambda: c.log("node-f").count("TEST-EVENT admin_access") == 1, 1))
         results.append(wait_until("the stand-alone finger stays local",
                                   lambda: all(c.slots(n).get(1) != "zoe" for n in ("node-a", "node-b", "node-c")), 1))
 

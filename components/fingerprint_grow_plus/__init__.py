@@ -55,6 +55,9 @@ CONF_ON_SLOT_UPDATED = "on_slot_updated"
 CONF_ON_SLOT_DELETED = "on_slot_deleted"
 CONF_ON_ENROLL_STARTED = "on_enroll_started"
 CONF_ON_ADMIN_TOUCH = "on_admin_touch"
+CONF_ON_ADMIN_ACCESS = "on_admin_access"
+CONF_ACCESS = "access"
+ADMIN_ACCESS = {"off": 0, "immediate": 1, "delayed": 2}
 CONF_ON_ADMIN_GESTURE = "on_admin_gesture"
 CONF_ON_ADMIN_HOLD = "on_admin_hold"
 CONF_ON_ADMIN_WAITING = "on_admin_waiting"
@@ -149,6 +152,8 @@ def _validate_admin(config):
     ]
     if len(used) != len(set(used)):
         raise cv.Invalid("every admin gesture needs its own number of touches (0 = disabled)")
+    if config[CONF_ACCESS] != "off" and 1 in used:
+        raise cv.Invalid("access: a single touch is the access action, no gesture may use 1 touch")
     return config
 
 
@@ -176,6 +181,9 @@ ADMIN_SCHEMA = cv.All(
             # Time to present the target finger for delete / re-enroll.
             cv.Optional(CONF_TARGET_TIMEOUT, default="10s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_NUM_SCANS, default=3): cv.int_range(min=1, max=6),
+            # A single touch of an admin finger fires on_admin_access: right away (immediate) or
+            # once the gesture is complete and it stayed a single touch (delayed).
+            cv.Optional(CONF_ACCESS, default="off"): cv.one_of(*ADMIN_ACCESS, lower=True),
         }
     ),
     _validate_admin,
@@ -285,6 +293,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ON_SLOT_DELETED): automation.validate_automation({}),
             cv.Optional(CONF_ON_ENROLL_STARTED): automation.validate_automation({}),
             cv.Optional(CONF_ON_ADMIN_TOUCH): automation.validate_automation({}),
+            cv.Optional(CONF_ON_ADMIN_ACCESS): automation.validate_automation({}),
             cv.Optional(CONF_ON_ADMIN_GESTURE): automation.validate_automation({}),
             cv.Optional(CONF_ON_ADMIN_HOLD): automation.validate_automation({}),
             cv.Optional(CONF_ON_ADMIN_WAITING): automation.validate_automation({}),
@@ -325,6 +334,11 @@ _CALLBACK_AUTOMATIONS = (
     ),
     automation.CallbackAutomation(
         CONF_ON_ADMIN_TOUCH, "add_on_admin_touch_callback", [(cg.uint8, "touches")]
+    ),
+    automation.CallbackAutomation(
+        CONF_ON_ADMIN_ACCESS,
+        "add_on_admin_access_callback",
+        [(cg.uint16, "finger_id"), (cg.uint16, "confidence")],
     ),
     automation.CallbackAutomation(
         CONF_ON_ADMIN_GESTURE, "add_on_admin_gesture_callback", [(cg.uint8, "touches")]
@@ -411,6 +425,7 @@ async def to_code(config):
                 admin[CONF_NUM_SCANS],
             )
         )
+        cg.add(var.set_admin_access(ADMIN_ACCESS[admin[CONF_ACCESS]]))
     if guests := config.get(CONF_GUESTS):
         low, high = guests[CONF_SLOTS]
         cg.add(var.set_guests(low, high, guests[CONF_VALID_FOR]))

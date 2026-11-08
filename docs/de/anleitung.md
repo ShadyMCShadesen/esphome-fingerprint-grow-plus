@@ -101,6 +101,11 @@ eine Anzahl Berührungen, abgeschlossen durch eine Pause von 2 s ohne Finger auf
 | 4×, dann Finger | dieser Finger wird im selben Slot neu eingelernt (überall ersetzt) |
 | halten (3 s) | Statusanzeige über `on_admin_hold` und `health()` |
 
+Mit `admin: access: delayed` wirkt der Admin-Finger bei **einmal** Auflegen wie ein normaler Finger
+(Trigger `on_admin_access`, z. B. Tür öffnen), sobald er 2 s nicht mehr aufliegt; zweimal oder
+öfter öffnet weiter das Admin-Menü, ohne die Tür zu öffnen. `access: immediate` löst sofort beim
+ersten Auflegen aus; ein zweites Auflegen öffnet dann zusätzlich das Menü.
+
 Admin-Finger sind geschützt: kein Löschen per Geste oder `fingerprint_grow_plus.delete`, `delete_all`
 lässt sie stehen. Entfernen nur mit `fingerprint_grow_plus.delete_admin` und Code. In
 `on_finger_scan_matched` die normalen Aktionen mit `fingerprint_grow_plus.is_admin_slot` und

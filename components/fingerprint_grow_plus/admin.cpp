@@ -56,7 +56,7 @@ uint8_t FingerprintGrowPlusComponent::health() const {
 // Gestures
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id) {
+void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id, uint16_t confidence) {
   const uint32_t now = millis();
   this->last_activity_ms_ = now;
   if (!this->admin_enabled_)
@@ -85,7 +85,15 @@ void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id) {
   // A hold is only possible on the first touch and needs a finger sensor to see the finger.
   this->admin_hold_possible_ = this->admin_hits_ == 1 && this->hold_ms_ > 0 && this->finger_sensor_ != nullptr;
   ESP_LOGD(TAG, "Admin finger (slot %u), touch %u", finger_id, this->admin_hits_);
+  if (this->admin_hits_ == 1) {
+    this->admin_first_slot_ = finger_id;
+    this->admin_first_confidence_ = confidence;
+  }
   this->admin_touch_cb_.call(this->admin_hits_);
+  if (this->admin_access_ == 1 && this->admin_hits_ == 1) {
+    ESP_LOGI(TAG, "Admin finger (slot %u): access", finger_id);
+    this->admin_access_cb_.call(finger_id, confidence);
+  }
 }
 
 void FingerprintGrowPlusComponent::admin_loop_() {
@@ -124,7 +132,10 @@ void FingerprintGrowPlusComponent::admin_loop_() {
 void FingerprintGrowPlusComponent::run_gesture_(uint8_t touches) {
   ESP_LOGI(TAG, "Admin gesture: %u touch(es)", touches);
   this->admin_gesture_cb_.call(touches);
-  if (touches == this->enroll_touches_) {
+  if (touches == 1 && this->admin_access_ == 2) {
+    ESP_LOGI(TAG, "Admin finger (slot %u): access", this->admin_first_slot_);
+    this->admin_access_cb_.call(this->admin_first_slot_, this->admin_first_confidence_);
+  } else if (touches == this->enroll_touches_) {
     this->enroll_next_free(this->admin_num_scans_);
   } else if (touches == this->delete_touches_) {
     this->arm_(AdminArm::DELETE);

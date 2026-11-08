@@ -62,7 +62,7 @@ void FingerprintGrowPlusComponent::setup() {
   this->grow_->add_on_finger_scan_misplaced_callback(activity);
   this->grow_->add_on_finger_scan_invalid_callback(activity);
   this->grow_->add_on_finger_scan_matched_callback(
-      [this](uint16_t finger_id, uint16_t /*confidence*/) { this->on_matched_(finger_id); });
+      [this](uint16_t finger_id, uint16_t confidence) { this->on_matched_(finger_id, confidence); });
   // Enrollment uses the sensor's character buffers across several loop() calls; no sync job
   // may touch them from the first enrollment scan until the enrollment has finished.
   this->grow_->add_on_enrollment_scan_callback([this](uint8_t, uint16_t) {
@@ -119,6 +119,8 @@ void FingerprintGrowPlusComponent::dump_config() {
                   " ms",
                   this->enroll_touches_, this->delete_touches_, this->reenroll_touches_, this->guest_touches_,
                   this->hold_ms_);
+  if (this->admin_enabled_ && this->admin_access_ != 0)
+    ESP_LOGCONFIG(TAG, "  Admin single touch: access (%s)", this->admin_access_ == 1 ? "immediate" : "delayed");
   if (this->guests_enabled_)
     ESP_LOGCONFIG(TAG, "  Guest slots: %u-%u, default validity %" PRIu32 " h%s", this->guest_from_, this->guest_to_,
                   this->guest_valid_s_ / 3600,

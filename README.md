@@ -162,6 +162,23 @@ fingerprint_grow:
           - script.execute: open_door
 ```
 
+**Admin finger as a normal finger too** (`admin: access:`): a single touch fires
+`on_admin_access`, two or more touches still open the admin menu.
+
+- `delayed`: fires once the gesture is complete (the finger stayed away for `window`) and it was
+  one touch. Opening the menu never triggers the access action; the access action comes about
+  2 s after lifting the finger.
+- `immediate`: fires at the first touch without delay. A second touch then opens the menu, but
+  the access action has already run.
+
+```yaml
+fingerprint_grow_plus:
+  admin:
+    access: delayed
+  on_admin_access:          # finger_id, confidence
+    - script.execute: open_door
+```
+
 Status colour on hold (`health()`: 0 in sync, 1 syncing, 2 conflicts, 3 error):
 
 ```yaml
@@ -235,6 +252,7 @@ fingerprint_grow_plus:
     hold_time: 3s
     target_timeout: 10s
     num_scans: 3
+    access: off                       # off | delayed | immediate: single touch = on_admin_access
   guests:
     slots: "150-179"                  # at most 64 slots, outside the admin slots
     valid_for: 7d
@@ -265,6 +283,7 @@ fingerprint_grow_plus:
 | `on_slot_updated` / `on_slot_deleted` | `uint16_t slot` | the sync wrote / deleted a slot on this sensor |
 | `on_enroll_started` | `uint16_t slot` | enrollment of a free, guest or re-enrolled slot started |
 | `on_admin_touch` | `uint8_t touches` | admin finger matched (1, 2, …) |
+| `on_admin_access` | `uint16_t finger_id`, `uint16_t confidence` | single admin touch with `admin: access` |
 | `on_admin_gesture` | `uint8_t touches` | gesture complete |
 | `on_admin_hold` | – | admin finger held |
 | `on_admin_waiting` | `std::string action` | waiting for the finger to `delete` / `reenroll` |

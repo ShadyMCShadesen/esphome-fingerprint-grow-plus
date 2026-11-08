@@ -136,6 +136,8 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
     this->target_timeout_ms_ = target_ms;
     this->admin_num_scans_ = num_scans;
   }
+  // 0 off, 1 immediate (first touch), 2 delayed (gesture completed with a single touch)
+  void set_admin_access(uint8_t mode) { this->admin_access_ = mode; }
   void set_guests(uint16_t from, uint16_t to, uint32_t valid_s) {
     this->guests_enabled_ = true;
     this->guest_from_ = from;
@@ -178,6 +180,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   template<typename F> void add_on_slot_updated_callback(F &&cb) { this->slot_updated_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_slot_deleted_callback(F &&cb) { this->slot_deleted_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_admin_touch_callback(F &&cb) { this->admin_touch_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_admin_access_callback(F &&cb) { this->admin_access_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_admin_gesture_callback(F &&cb) {
     this->admin_gesture_cb_.add(std::forward<F>(cb));
   }
@@ -289,7 +292,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void set_expiry_(uint16_t slot, uint32_t expires);
 
   // admin.cpp
-  void on_matched_(uint16_t finger_id);
+  void on_matched_(uint16_t finger_id, uint16_t confidence);
   void admin_loop_();
   void run_gesture_(uint8_t touches);
   void arm_(AdminArm action);
@@ -435,6 +438,10 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   CallbackManager<void(uint16_t)> enroll_started_cb_;
   CallbackManager<void(uint8_t)> admin_touch_cb_;
   CallbackManager<void(uint8_t)> admin_gesture_cb_;
+  CallbackManager<void(uint16_t, uint16_t)> admin_access_cb_;
+  uint8_t admin_access_{0};
+  uint16_t admin_first_slot_{0};
+  uint16_t admin_first_confidence_{0};
   CallbackManager<void()> admin_hold_cb_;
   CallbackManager<void(std::string)> admin_waiting_cb_;
   CallbackManager<void()> admin_cancelled_cb_;

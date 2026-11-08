@@ -29,7 +29,8 @@ End-to-end scenarios:
 7. Restore from the backup is refused without a restore window, works with one, and propagates.
 8. Hostile peers are cut off (handshake timeout, duplicate manifest).
 9. An admin deletes a finger on all nodes by presenting it after 3 touches.
-10. A stand-alone node (no key) enrolls with the admin gesture; the finger stays local.
+10. A stand-alone node (no key) enrolls with the admin gesture; the finger stays local; with
+    `access: delayed` a single admin touch fires `on_admin_access`, two touches do not.
 11. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by

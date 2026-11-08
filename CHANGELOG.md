@@ -17,6 +17,8 @@ versioning: [Semantic Versioning](https://semver.org/).
   update. Synced sensors with identical templates converge without conflicts.
 
 ### Added
+- `admin: access: delayed | immediate`: a single touch of an admin finger fires
+  `on_admin_access` (e.g. open the door); two or more touches still open the admin menu.
 - Stand-alone mode: without `key` the node opens no network port and uses admin fingers, guests,
   protected slots and button enrollment locally.
 
