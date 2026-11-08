@@ -167,6 +167,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
 #endif
 #ifdef USE_TEXT_SENSOR
   void set_status_text_sensor(text_sensor::TextSensor *s) { this->status_text_sensor_ = s; }
+  void set_occupied_text_sensor(text_sensor::TextSensor *s) { this->occupied_text_sensor_ = s; }
 #endif
 #ifdef USE_BINARY_SENSOR
   void set_syncing_binary_sensor(binary_sensor::BinarySensor *s) { this->syncing_binary_sensor_ = s; }
@@ -361,6 +362,9 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
 #endif
 #ifdef USE_TEXT_SENSOR
   text_sensor::TextSensor *status_text_sensor_{nullptr};
+  text_sensor::TextSensor *occupied_text_sensor_{nullptr};
+  uint32_t last_occupied_ms_{0};
+  void publish_occupied_();
 #endif
 #ifdef USE_BINARY_SENSOR
   binary_sensor::BinarySensor *syncing_binary_sensor_{nullptr};

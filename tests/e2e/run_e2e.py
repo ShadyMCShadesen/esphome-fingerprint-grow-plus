@@ -37,6 +37,8 @@ NODES = {
     "node-e": {"port": 18535, "peers": ["node-a"], "include": ["0-199"], "exclude": [], "dry_run": True},
     # node-f runs stand-alone (no key): admin features only, no network port
     "node-f": {"port": 0, "peers": [], "include": ["0-199"], "exclude": [], "standalone": True},
+    # node-g syncs only the admin slot 0 with node-a; all other slots are local
+    "node-g": {"port": 18537, "peers": ["node-a"], "include": ["0"], "exclude": []},
 }
 
 SEEDS = {
@@ -47,6 +49,7 @@ SEEDS = {
     "node-d": {"7": {"finger": "mallory"}},
     "node-e": {"9": {"finger": "grace"}},
     "node-f": {"0": {"finger": "admin"}},
+    "node-g": {"1": {"finger": "gina"}},
 }
 
 YAML_TEMPLATE = """
@@ -89,6 +92,8 @@ text_sensor:
   - platform: fingerprint_grow_plus
     status:
       name: Sync status
+    occupied_slots:
+      name: Occupied slots
 fingerprint_grow_plus:
   id: fp_plus
   key: "{key}"
@@ -585,6 +590,27 @@ def main():
                                   lambda: c.log("node-f").count("TEST-EVENT admin_access") == 1, 1))
         results.append(wait_until("the stand-alone finger stays local",
                                   lambda: all(c.slots(n).get(1) != "zoe" for n in ("node-a", "node-b", "node-c")), 1))
+
+        print("== Scenario 11: node syncing only the admin slot, local features on all other slots")
+        results.append(wait_until("node-g received the admin finger (slot 0) from A",
+                                  lambda: c.slots("node-g").get(0) == "admin", 60))
+        results.append(wait_until("G's local slot 1 (gina) is kept, not synced and never a conflict",
+                                  lambda: c.slots("node-g").get(1) == "gina" and c.slots("node-a").get(1) != "gina"
+                                  and "CONFLICT" not in c.log("node-g"), 5))
+        c.touch("node-g", "admin")
+        time.sleep(1.5)
+        c.touch("node-g", "admin")
+        results.append(wait_until("admin gesture on G enrolls the next free local slot (2)",
+                                  lambda: "TEST-EVENT enroll_started 2" in c.log("node-g"), 20))
+        time.sleep(1.5)
+        c.touches("node-g", "hank", 2, gap=1.5)
+        results.append(wait_until("hank enrolled in slot 2 on G",
+                                  lambda: c.slots("node-g").get(2) == "hank", 30))
+        time.sleep(20)  # at least one more round between G and A
+        results.append(wait_until("occupied_slots text sensor on G shows 0-2",
+                                  lambda: "Occupied slots: 0-2" in c.log("node-g"), 10))
+        results.append(wait_until("G's local fingers never reach A",
+                                  lambda: all(f not in c.slots("node-a").values() for f in ("gina", "hank")), 1))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))

@@ -17,6 +17,9 @@ versioning: [Semantic Versioning](https://semver.org/).
   update. Synced sensors with identical templates converge without conflicts.
 
 ### Added
+- Text sensor `occupied_slots`: the occupied slots of the sensor as ranges (e.g. `0, 2-5, 99`).
+- `tools/growplus.py backup` without `--out` names the file `<host>-<date>_<time>.fgpb` (no shell
+  date command needed, works on Windows); docs show PowerShell commands.
 - `admin: access: delayed | immediate`: a single touch of an admin finger fires
   `on_admin_access` (e.g. open the door); two or more touches still open the admin menu.
 - Stand-alone mode: without `key` the node opens no network port and uses admin fingers, guests,
@@ -34,6 +37,9 @@ versioning: [Semantic Versioning](https://semver.org/).
   synced and enforced by every node with a valid time.
 
 ### Fixed
+- `include_slots` / `exclude_slots` only limit the sync: `enroll_next_free`, guests (including
+  expiry) and `delete_all` now also work on slots outside the synced range, locally. A node can
+  share only the admin finger with others and keep its own users.
 - Admin gestures on real sensors: the pause that completes a gesture now starts when the finger
   is lifted (with `finger_sensor`), not at the match. Matching the next touch takes 1.5-3 s on an
   R503, so two touches were often counted as two single touches and nothing happened.

@@ -18,9 +18,13 @@
 
    ```bash
    export GROWPLUS_KEY='<key from secrets.yaml>'
-   python3 tools/growplus.py backup --host <node>.local --out <node>-$(date +%F).fgpb
-   python3 tools/growplus.py inspect --in <node>-$(date +%F).fgpb
+   python3 tools/growplus.py backup --host <node>.local
+   python3 tools/growplus.py inspect --in <node>-<date>_<time>.fgpb
    ```
+
+   Without `--out` the file is named `<node>-<date>_<time>.fgpb`. On Windows (PowerShell) use
+   `$env:GROWPLUS_KEY = '<key>'` and `py tools\growplus.py …`; in `cmd.exe`
+   `set GROWPLUS_KEY=<key>`. Alternatively pass `--key-file <file>` on every system.
 
 5. **Hardware checks.** Run the compatibility tests in [testing.md](testing.md) (A1–A4).
    Nodes that already hold fingers will report **conflicts** for every slot whose template

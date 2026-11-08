@@ -285,13 +285,15 @@ void FingerprintGrowPlusComponent::guest_expiry_loop_() {
     return;
   for (uint16_t slot = 0; slot < this->capacity_; slot++) {
     const uint32_t exp = this->expires_[slot];
-    if (exp == 0 || now < exp || !meta_present(this->meta_[slot]) || this->is_admin_slot(slot))
+    const bool synced = this->managed_(slot);
+    const bool present = synced ? meta_present(this->meta_[slot]) : this->local_present_[slot];
+    if (exp == 0 || now < exp || !present || this->is_admin_slot(slot))
       continue;
-    ESP_LOGI(TAG, "Guest finger in slot %u expired; deleting it on all nodes", slot);
+    ESP_LOGI(TAG, "Guest finger in slot %u expired; deleting it%s", slot, synced ? " on all nodes" : "");
     Job job;
     job.type = JobType::DELETE;
     job.slot = slot;
-    job.flags = JOB_FLAG_LOCAL | JOB_FLAG_PROPAGATE;
+    job.flags = JOB_FLAG_LOCAL | (synced ? JOB_FLAG_PROPAGATE : 0);
     this->queue_job_(std::move(job));
   }
 }
@@ -303,9 +305,12 @@ int32_t FingerprintGrowPlusComponent::next_free_in_(uint16_t from, uint16_t to, 
   for (uint32_t slot = from; slot <= to; slot++) {
     if (this->is_admin_slot(slot) || (!guests_allowed && this->in_guest_range_(slot)))
       continue;
-    if (!this->managed_(slot) || this->local_present_[slot] || this->remote_present_[slot] || this->conflict_[slot])
+    if (this->local_present_[slot])
       continue;
-    if (meta_present(this->meta_[slot]))
+    // Synced slots must also be free on the peers. Slots outside include/exclude are local
+    // only: free when this sensor has nothing there.
+    if (this->managed_(slot) &&
+        (this->remote_present_[slot] || this->conflict_[slot] || meta_present(this->meta_[slot])))
       continue;
     return (int32_t) slot;
   }

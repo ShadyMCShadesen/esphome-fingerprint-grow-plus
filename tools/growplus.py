@@ -275,8 +275,17 @@ def cmd_status(args):
         print(f"  slot {slot:4d}  {STATE_NAMES[meta >> 14]:<17} version {meta & 0x3FFF}{until}")
 
 
+def default_backup_name(host):
+    """<host>-YYYY-MM-DD_HHMM.fgpb in the current directory (no shell date tricks needed)."""
+    name = host[:-6] if host.lower().endswith(".local") else host
+    name = "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
+    return f"{name}-{time.strftime('%Y-%m-%d_%H%M')}.fgpb"
+
+
 def cmd_backup(args):
     key = load_key(args)
+    if not args.out:
+        args.out = default_backup_name(args.host)
     if os.path.exists(args.out):
         sys.exit(f"{args.out} exists; refusing to overwrite")
     ch = connect(args, key)
@@ -365,7 +374,7 @@ def main():
     p.set_defaults(func=cmd_status)
     p = sub.add_parser("backup")
     common(p)
-    p.add_argument("--out", required=True)
+    p.add_argument("--out", help="output file (default: <host>-<date>_<time>.fgpb)")
     p.add_argument("--slots", help="e.g. 0,2,10-19 (default: all)")
     p.set_defaults(func=cmd_backup)
     p = sub.add_parser("restore")

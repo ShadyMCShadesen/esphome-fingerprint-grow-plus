@@ -76,7 +76,12 @@ void FingerprintGrowPlusComponent::setup() {
       return;
     this->local_present_[slot] = true;
     if (!this->managed_(slot)) {
-      ESP_LOGI(TAG, "Slot %u enrolled locally; it is not synced (outside the managed slots)", slot);
+      // Local-only slot (outside include/exclude): no version, no hash, only the guest expiry.
+      if (slot == this->pending_guest_slot_) {
+        this->set_expiry_(slot, this->pending_guest_expiry_);
+        this->pending_guest_slot_ = NO_SLOT;
+      }
+      ESP_LOGI(TAG, "Slot %u enrolled locally; it is not synced (outside the synced slots)", slot);
       return;
     }
     this->pending_hash_++;  // counted before queueing: queue_job_ undoes it for a duplicate
@@ -194,6 +199,42 @@ uint16_t FingerprintGrowPlusComponent::conflict_count() const {
     n += c ? 1 : 0;
   return n;
 }
+
+#ifdef USE_TEXT_SENSOR
+void FingerprintGrowPlusComponent::publish_occupied_() {
+  // HA text states are limited to 255 characters; ranges keep the list short.
+  static constexpr size_t MAX_LEN = 250;
+  std::string out;
+  uint16_t slot = 0;
+  while (slot < this->capacity_) {
+    if (!this->local_present_[slot]) {
+      slot++;
+      continue;
+    }
+    uint16_t end = slot;
+    while (end + 1 < this->capacity_ && this->local_present_[end + 1])
+      end++;
+    char part[16];
+    if (end == slot) {
+      snprintf(part, sizeof(part), "%s%u", out.empty() ? "" : ", ", slot);
+    } else {
+      snprintf(part, sizeof(part), "%s%u-%u", out.empty() ? "" : ", ", slot, end);
+    }
+    if (out.size() + strlen(part) > MAX_LEN) {
+      out += ", ...";
+      break;
+    }
+    out += part;
+    slot = end + 1;
+  }
+  if (out.empty())
+    out = "-";
+  if (!this->occupied_text_sensor_->has_state() || this->occupied_text_sensor_->state != out) {
+    ESP_LOGD(TAG, "Occupied slots: %s", out.c_str());
+    this->occupied_text_sensor_->publish_state(out);
+  }
+}
+#endif
 
 void FingerprintGrowPlusComponent::publish_diagnostics_() {
 #ifdef USE_SENSOR
@@ -666,16 +707,16 @@ void FingerprintGrowPlusComponent::job_delete_(Job &job) {
     this->publish_diagnostics_();
     return;
   }
-  uint16_t meta = job.meta;
-  if (job.flags & JOB_FLAG_LOCAL)
-    meta = meta_pack(SLOT_TOMBSTONE, this->next_version_());
   if (slot < this->capacity_) {
     this->local_present_[slot] = false;
+    this->set_expiry_(slot, 0);
     if (this->managed_(slot)) {
+      uint16_t meta = job.meta;
+      if (job.flags & JOB_FLAG_LOCAL)
+        meta = meta_pack(SLOT_TOMBSTONE, this->next_version_());
       this->meta_[slot] = meta;
       this->hash_known_[slot] = false;
       this->conflict_[slot] = false;
-      this->set_expiry_(slot, 0);
       this->mark_dirty_();
     }
   }
@@ -842,11 +883,23 @@ void FingerprintGrowPlusComponent::delete_all(const std::string &code) {
   }
   if (!this->params_loaded_)
     return;
-  ESP_LOGW(TAG, "Deleting ALL managed slots except the admin fingers on this node and on all peers");
+  ESP_LOGW(TAG, "Deleting ALL fingers except the admin fingers on this node, synced slots also on all peers");
   uint16_t queued = 0;
   for (uint16_t slot = 0; slot < this->capacity_; slot++) {
-    if (!this->managed_(slot) || this->is_admin_slot(slot))
+    if (this->is_admin_slot(slot))
       continue;  // admin fingers survive delete_all
+    if (!this->managed_(slot)) {
+      // Local-only slot (outside include/exclude): delete it here, nothing to propagate.
+      if (this->local_present_[slot]) {
+        Job job;
+        job.type = JobType::DELETE;
+        job.slot = slot;
+        job.flags = JOB_FLAG_LOCAL;
+        this->queue_job_(std::move(job));
+        queued++;
+      }
+      continue;
+    }
     if (!this->local_present_[slot] && !meta_present(this->meta_[slot])) {
       // Nothing here, but peers may still have it: write a tombstone without a sensor call.
       this->meta_[slot] = meta_pack(SLOT_TOMBSTONE, this->next_version_());
@@ -1576,6 +1629,12 @@ void FingerprintGrowPlusComponent::loop() {
 
   this->admin_loop_();
   this->guest_expiry_loop_();
+#ifdef USE_TEXT_SENSOR
+  if (this->occupied_text_sensor_ != nullptr && this->indexed_once_ && elapsed(now, this->last_occupied_ms_, 2000)) {
+    this->last_occupied_ms_ = now;
+    this->publish_occupied_();
+  }
+#endif
 
   // One sensor job per loop iteration keeps every loop() call short.
   this->run_next_job_();

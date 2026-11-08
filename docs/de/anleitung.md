@@ -122,15 +122,40 @@ aktualisieren.
 
 ## Backup und Restore
 
+Linux / macOS:
+
 ```bash
 export GROWPLUS_KEY='<Schlüssel>'
-python3 tools/growplus.py backup  --host <geraet>.local --out <geraet>.fgpb
-python3 tools/growplus.py inspect --in <geraet>.fgpb
+python3 tools/growplus.py backup  --host <geraet>.local
+python3 tools/growplus.py inspect --in <geraet>-<datum>_<uhrzeit>.fgpb
 # am Gerät zuerst fingerprint_grow_plus.allow_restore auslösen, dann:
-python3 tools/growplus.py restore --host <geraet>.local --in <geraet>.fgpb
+python3 tools/growplus.py restore --host <geraet>.local --in <datei>.fgpb
 ```
 
+Windows (PowerShell):
+
+```powershell
+$env:GROWPLUS_KEY = '<Schlüssel>'
+py tools\growplus.py backup  --host <geraet>.local
+py tools\growplus.py inspect --in <geraet>-<datum>_<uhrzeit>.fgpb
+py tools\growplus.py restore --host <geraet>.local --in <datei>.fgpb
+```
+
+Ohne `--out` heißt die Datei automatisch `<geraet>-<datum>_<uhrzeit>.fgpb`. Statt der
+Umgebungsvariable geht auf jedem System auch `--key-file <datei>`.
+
 Backup-Dateien sind verschlüsselt, enthalten aber biometrische Daten: nie in ein Repository legen.
+
+## Nur einzelne Slots synchronisieren
+
+`include_slots` / `exclude_slots` bestimmen nur, was **synchronisiert** wird. Admin-Gesten, Gäste,
+`enroll_next_free` und `delete_all` arbeiten auf allen Slots des Sensors; Slots außerhalb bleiben
+lokal. Beispiel: Ein Gerät an einem anderen Standort teilt nur den Admin-Finger
+(`include_slots: ["99"]`) und hat sonst eigene Finger. Über VPN/Router funktioniert mDNS nicht,
+dort die Peers als IP-Adresse oder DNS-Namen eintragen.
+
+Der Text-Sensor `occupied_slots` (Plattform `fingerprint_grow_plus` unter `text_sensor:`) zeigt
+die belegten Slots als Bereiche, z. B. `0, 2-5, 99, 150-151`.
 
 ## Netzwerk
 

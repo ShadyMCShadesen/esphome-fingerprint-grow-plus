@@ -219,11 +219,26 @@ button:
       - fingerprint_grow_plus.enroll_next_free: 3
 ```
 
-### Node-exclusive slots
+### Node-exclusive slots, or sync only some slots
+
+`include_slots` / `exclude_slots` only decide what is **synced**. Admin gestures, guests,
+`enroll_next_free` and `delete_all` work on all slots of the sensor; slots outside the synced
+range simply stay on this node.
 
 ```yaml
 fingerprint_grow_plus:
   exclude_slots: ["180-199"]   # never sent, received or deleted by the sync
+```
+
+A node at another site that only shares the admin finger and keeps its own users:
+
+```yaml
+fingerprint_grow_plus:
+  key: !secret fingerprint_grow_plus_key
+  peers: [192.168.10.21, 192.168.10.22]   # mDNS does not cross VPNs/routers: use IPs or DNS
+  include_slots: ["99"]                   # only the admin finger is synced
+  admin:
+    slots: [99]
 ```
 
 ## Configuration reference
@@ -266,8 +281,8 @@ fingerprint_grow_plus:
     - {host: 10.20.0.5, port: 18531}
   port: 18530                         # listen port and default peer port
   allowed_networks: [192.168.10.0/24] # accept inbound peers only from these networks
-  include_slots: ["0-199"]            # default: all slots
-  exclude_slots: []                   # node-exclusive slots
+  include_slots: ["0-199"]            # synced slots (default: all); local features use all slots
+  exclude_slots: []                   # never synced (node-exclusive slots)
   sync_interval: 15min                # also re-reads the local index when stand-alone
   startup_delay: 10s
   dry_run: false
@@ -325,6 +340,7 @@ sensor:
 text_sensor:
   - platform: fingerprint_grow_plus
     status: {name: Sync status}
+    occupied_slots: {name: Occupied slots}   # e.g. "0, 2-5, 99, 150-151"
 binary_sensor:
   - platform: fingerprint_grow_plus
     syncing: {name: Syncing}

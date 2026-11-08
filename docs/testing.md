@@ -31,7 +31,9 @@ End-to-end scenarios:
 9. An admin deletes a finger on all nodes by presenting it after 3 touches.
 10. A stand-alone node (no key) enrolls with the admin gesture; the finger stays local; with
     `access: delayed` a single admin touch fires `on_admin_access`, two touches do not.
-11. `SetPwd` is never sent to any sensor.
+11. A node that syncs only the admin slot receives it, keeps its local fingers out of the sync,
+    enrolls into a local slot with the admin gesture and reports `occupied_slots`.
+12. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
 `fingerprint_grow` and `fingerprint_grow_plus` with synthetic templates (no real biometric data).
