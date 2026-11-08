@@ -9,7 +9,8 @@ versioning: [Semantic Versioning](https://semver.org/).
 - `fingerprint_sync.self_test` action: step-by-step LoadChar/UpChar/DownChar/Match diagnosis on
   the own sensor (buffers only).
 
-- `fingerprint_sync.resolve_all_conflicts` action for the initial rollout.
+- `fingerprint_sync.claim_all_slots` (make one node the reference) and
+  `fingerprint_sync.resolve_all_conflicts` for the initial rollout.
 - `self_test` option `compare_slot` to score two different slots.
 
 ### Changed
@@ -23,6 +24,8 @@ versioning: [Semantic Versioning](https://semver.org/).
   capacity; a capacity below the number of stored templates is rejected.
 
 ### Fixed
+- ESP32 Arduino builds parsed ReadSysPara wrongly (capacity 2): a helper named `word` collided
+  with the Arduino `word(...)` macro.
 - Sensor parameters are read twice and checked for plausibility; an inconsistent answer (seen as
   `capacity 2` on real hardware) no longer shrinks the managed slot range.
 - `DownChar` logs any unsolicited answer of the module.

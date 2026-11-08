@@ -167,15 +167,17 @@ uint8_t GrowLink::read_params(GrowParams &params) {
   if (ack.size() < 17)
     return GROW_BAD_PACKET;
   memcpy(this->last_params_raw_, ack.data() + 1, 16);
-  auto word = [&ack](size_t index) -> uint16_t {
+  // Not named `word`: the Arduino core defines a function-like macro word(...) that silently
+  // turned word(2) into the constant 2 (seen on hardware as "capacity 2").
+  auto param_at = [&ack](size_t index) -> uint16_t {
     return ((uint16_t) ack[1 + 2 * index] << 8) | ack[2 + 2 * index];
   };
-  params.status = word(0);
-  params.system_id = word(1);
-  params.capacity = word(2);
-  params.security_level = word(3);
-  // word 4..5 = device address, word 6 = packet size code (0..3 -> 32/64/128/256 bytes)
-  uint16_t code = word(6);
+  params.status = param_at(0);
+  params.system_id = param_at(1);
+  params.capacity = param_at(2);
+  params.security_level = param_at(3);
+  // words 4..5 = device address, word 6 = packet size code (0..3 -> 32/64/128/256 bytes)
+  uint16_t code = param_at(6);
   params.packet_size = (uint16_t) (32u << (code > 3 ? 2 : code));
   this->packet_size_ = params.packet_size;
   return GROW_OK;

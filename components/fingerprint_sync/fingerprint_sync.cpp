@@ -647,6 +647,25 @@ void FingerprintSyncComponent::self_test(uint16_t slot, uint16_t compare_slot) {
   }
 }
 
+void FingerprintSyncComponent::claim_all_slots() {
+  if (!this->ready_) {
+    ESP_LOGW(TAG, "claim_all_slots refused: index not ready yet");
+    return;
+  }
+  uint16_t n = 0;
+  for (uint16_t slot = 0; slot < this->capacity_; slot++) {
+    if (!this->managed_(slot) || !meta_present(this->meta_[slot]))
+      continue;
+    this->meta_[slot] = meta_pack(SLOT_PRESENT_FORCED, this->next_version_());
+    this->conflict_[slot] = false;
+    n++;
+  }
+  this->mark_dirty_();
+  ESP_LOGW(TAG, "This node claims %u slot(s): peers replace their templates in these slots with this node's", n);
+  this->publish_diagnostics_();
+  this->request_round_(PUSH_DELAY_MS);
+}
+
 void FingerprintSyncComponent::resolve_all_conflicts(bool keep_local) {
   if (!this->params_loaded_)
     return;

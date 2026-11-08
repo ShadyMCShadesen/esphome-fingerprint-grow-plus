@@ -177,6 +177,9 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   /// Diagnostic: exercise LoadChar/UpChar/DownChar/Match on `slot` using only the sensor's
   /// character buffers (no slot is written) and log every step.
   void self_test(uint16_t slot, uint16_t compare_slot = NO_SLOT);
+  /// Make this node the reference for every managed slot it holds: all of them get a new
+  /// forced version and replace the peers' templates in these slots (initial rollout).
+  void claim_all_slots();
   /// Resolve every conflict found in the last round at once (see resolve_conflict).
   void resolve_all_conflicts(bool keep_local);
   static constexpr uint16_t NO_SLOT = 0xFFFF;

@@ -400,6 +400,12 @@ automation.register_apply_action(
 )
 
 automation.register_apply_action(
+    "fingerprint_sync.claim_all_slots",
+    _PARENT_SCHEMA,
+    automation.ApplyCall("claim_all_slots()"),
+)
+
+automation.register_apply_action(
     "fingerprint_sync.resolve_all_conflicts",
     cv.Schema(
         {

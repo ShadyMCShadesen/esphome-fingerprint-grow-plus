@@ -146,7 +146,8 @@ own LED logic.
 | `fingerprint_sync.delete_all` | `code`, `confirm_cluster_wide: true` | delete all managed slots on all nodes |
 | `fingerprint_sync.enroll_next_free` | `num_scans` (default 3) | enroll the lowest slot that is free on all known nodes |
 | `fingerprint_sync.resolve_conflict` | `slot`, `keep_local` | `true`: this node's finger wins everywhere; `false`: take the peer's finger |
-| `fingerprint_sync.resolve_all_conflicts` | `keep_local` | the same for every conflict of the last round (initial rollout: make one node the reference) |
+| `fingerprint_sync.resolve_all_conflicts` | `keep_local` | the same for every conflict of the last round |
+| `fingerprint_sync.claim_all_slots` | – | make this node the reference: every managed slot it holds replaces the peers' template in that slot (initial rollout) |
 | `fingerprint_sync.allow_restore` | `duration` (default 5 min) | accept uploads from `tools/fpsync.py restore` |
 | `fingerprint_sync.self_test` | `slot` (default 0), `compare_slot` (optional) | diagnostic on the own sensor (buffers only): checks that a template survives the round trip sensor → ESP → sensor byte-identically |
 

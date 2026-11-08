@@ -26,6 +26,9 @@ templates directly between ESPHome nodes (no Home Assistant, no broker, no cloud
   `build_callback_automations`).
 
 ## Conventions
+- Arduino core macros (`word(...)`, `bit`, `lowByte`, `highByte`, `constrain`, `sq`, `round`, …)
+  must never be used as identifiers: a lambda named `word` silently broke ReadSysPara parsing on
+  Arduino builds only.
 - C++: ESPHome style (`this->`, trailing `_` for protected members), English comments.
 - Every change: `tests/run_unit_tests.sh` and `python3 tests/e2e/run_e2e.py` must pass.
 - Protocol changes: bump `PROTOCOL_VERSION`, update `docs/protocol.md` and `tools/fpsync.py`.

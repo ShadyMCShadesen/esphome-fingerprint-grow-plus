@@ -59,8 +59,9 @@ gewollt, denn es wird nie geraten.
 
 1. Von jedem Sensor ein Backup ziehen (siehe unten).
 2. Den Node mit der richtigen Zuordnung Finger → Slot als Referenz wählen.
-3. **Nur dort** `fingerprint_sync.resolve_all_conflicts` mit `keep_local: true` auslösen. Im
-   `dry_run` zeigen die anderen Nodes `[dry run] would REPLACE slot …`.
+3. **Nur dort** `fingerprint_sync.claim_all_slots` auslösen. Im `dry_run` zeigen die anderen
+   Nodes `[dry run] would REPLACE slot …`. Nur auf **einem** Node beanspruchen: Bei zwei
+   Referenzen gewinnt pro Slot die spätere.
 4. Passt alles, `dry_run: false` setzen.
 
 ## Einlernen ohne Home Assistant

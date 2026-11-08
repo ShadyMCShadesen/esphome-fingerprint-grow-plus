@@ -139,6 +139,7 @@ interval:
           else if (c == "allow_restore") id(fp_sync).allow_restore(120);
           else if (c == "self_test") id(fp_sync).self_test(a, b);
           else if (c == "resolve_all") id(fp_sync).resolve_all_conflicts(a != 0);
+          else if (c == "claim_all") id(fp_sync).claim_all_slots();
 """
 
 
@@ -329,6 +330,16 @@ def main():
             "B and C replaced slot 2 with A's template (C's dave is gone, B holds A's exact bytes)",
             lambda: c.slots("node-c").get(2) == "bob" and c.sha("node-c", 2) == sha_a
             and c.sha("node-b", 2) == sha_a, 60))
+
+        print("== Scenario 2b: node C claims all its slots (reference node without conflicts)")
+        before = {n: {s: c.sha(n, s) for s in (0, 1, 2, 5)} for n in ("node-a", "node-b")}
+        c.cmd("node-c", "claim_all")
+        results.append(wait_until(
+            "claim_all_slots on C: logged, propagated, contents of A and B unchanged (identical bytes)",
+            lambda: "This node claims" in c.log("node-c")
+            and "would REPLACE" not in c.log("node-a")
+            and all(c.sha(n, s) == before[n][s] for n in before for s in before[n])
+            and c.sha("node-a", 2) == c.sha("node-c", 2), 45))
 
         print("== Scenario 3: admin finger enrolls the next free slot on A, propagates")
         time.sleep(2)

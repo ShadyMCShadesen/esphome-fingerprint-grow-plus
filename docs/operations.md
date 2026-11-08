@@ -26,10 +26,11 @@
    Nodes that already hold fingers will report **conflicts** for every slot whose template
    differs. That is expected: the sync never guesses which finger is right.
    - Decide which node holds the correct assignment of fingers to slots (the *reference*).
-   - With backups of all sensors in place, run `fingerprint_sync.resolve_all_conflicts` with
-     `keep_local: true` **on the reference node only**. Its templates become forced versions and
-     replace the conflicting slots on the other nodes. In `dry_run` they log
-     `[dry run] would REPLACE slot …`.
+   - With backups of all sensors in place, run `fingerprint_sync.claim_all_slots` **on the
+     reference node only**. All its templates become forced versions and replace the same slots on
+     the other nodes. In `dry_run` they log `[dry run] would REPLACE slot …`.
+   - Claim on **one** node only. If two nodes claim, the later claim wins per slot, which can mix
+     the assignment of two nodes.
    - Slots that exist only on other nodes are copied to the reference node and everywhere else.
 6. **Go live.** Set `dry_run: false` on both nodes and verify. Then add the remaining nodes,
    again with a dry run first.
