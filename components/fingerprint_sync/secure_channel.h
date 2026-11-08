@@ -5,9 +5,9 @@
 // Wire format: every record is `u16 length (big endian) | body`.
 //
 // Handshake (plaintext bodies, see docs/protocol.md):
-//   C -> S  C_HELLO  "FPS" 0x01 0x01 | client_id u32 | nonce_c[16]
-//   S -> C  S_HELLO  "FPS" 0x01 0x02 | server_id u32 | nonce_s[16] | proof_s[32]
-//   C -> S  C_AUTH   "FPS" 0x01 0x03 | proof_c[32]
+//   C -> S  C_HELLO  "FPS" 0x02 0x01 | client_id u32 | nonce_c[16]
+//   S -> C  S_HELLO  "FPS" 0x02 0x02 | server_id u32 | nonce_s[16] | proof_s[32]
+//   C -> S  C_AUTH   "FPS" 0x02 0x03 | proof_c[32]
 //
 // Keys: HKDF-SHA256(salt="fpsync-v1", ikm=PSK, info=nonce_c|nonce_s|client_id|server_id)
 //       -> k_auth | k_enc_c2s | k_mac_c2s | k_enc_s2c | k_mac_s2c (5 x 32 bytes)

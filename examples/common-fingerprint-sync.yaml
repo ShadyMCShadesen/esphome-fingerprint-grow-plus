@@ -12,10 +12,13 @@ fingerprint_grow:
     allow_other_uses: true
   on_finger_scan_matched:
     - if:
-        # Slot 0 is the admin finger: it only arms enrollment (fingerprint_sync admin)
-        # and must never trigger the normal actions (open door, ...).
+        # Admin fingers only operate the sync, and a finger shown during an admin action
+        # (delete / re-enroll) is a target, not a visitor: never open anything for them.
         condition:
-          lambda: "return finger_id != 0;"
+          not:
+            or:
+              - fingerprint_sync.is_admin_slot: !lambda return finger_id;
+              - fingerprint_sync.is_admin_busy:
         then:
           - logger.log:
               format: "finger %u matched - your door/gate action goes here"
@@ -42,12 +45,30 @@ fingerprint_sync:
   finger_sensor: finger_detected
   fingerprint_count_sensor: fingerprint_count
   fingerprint_capacity_sensor: fingerprint_capacity
-  # Admin finger: touch slot 0 twice within 5 s to enroll a new finger in the next free slot.
+  # Admin fingers (protected): 2 touches = enroll next free slot, 3 touches + finger = delete
+  # that finger everywhere, 4 touches + finger = re-enroll it, 5 touches = enroll a guest,
+  # hold 3 s = status (on_admin_hold).
   admin:
-    slot: 0
-    touches: 2
-    window: 5s
+    slots: [0, 1]
+    enroll_touches: 2
+    delete_touches: 3
+    reenroll_touches: 4
+    guest_touches: 5
     num_scans: 3
+  # Guest fingers are deleted on all nodes when they expire (needs time_id).
+  guests:
+    slots: "150-179"
+    valid_for: 7d
+  time_id: sntp_time
+  on_admin_hold:
+    # Status colour: green = in sync, blue = syncing, yellow = conflict, red = error.
+    - lambda: |-
+        static const uint8_t colors[] = {4, 2, 5, 1};
+        id(grow).aura_led_control(2, 50, colors[id(fp_sync).health()], 5);
+  on_admin_waiting:
+    - logger.log:
+        format: "show the finger to %s"
+        args: [action.c_str()]
   # Recommended for the very first run on existing sensors: only log what would happen.
   dry_run: false
   on_sync_started:
@@ -158,3 +179,7 @@ button:
     entity_category: config
     on_press:
       - fingerprint_sync.allow_restore: 5min
+
+time:
+  - platform: sntp
+    id: sntp_time

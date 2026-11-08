@@ -28,7 +28,7 @@ import sys
 import time
 
 DEFAULT_PORT = 18530
-MAGIC = b"FPS\x01"
+MAGIC = b"FPS\x02"  # last byte = protocol version
 TAG_SIZE = 16
 MAX_RECORD_BODY = 2560
 MSG_MANIFEST, MSG_TEMPLATE_REQ, MSG_TEMPLATE, MSG_TEMPLATE_NAK, MSG_DONE, MSG_RESTORE, MSG_RESTORE_ACK = range(1, 8)
@@ -193,8 +193,9 @@ def read_manifest(ch: Channel):
             pos = 7
             for _ in range(count):
                 slot, meta = struct.unpack(">HH", msg[pos : pos + 4])
-                entries[slot] = (meta, msg[pos + 4 : pos + 12])
-                pos += 12
+                expires = struct.unpack(">I", msg[pos + 12 : pos + 16])[0]
+                entries[slot] = (meta, msg[pos + 4 : pos + 12], expires)
+                pos += 16
             if flags & 1:
                 return entries
         elif msg[0] == MSG_DONE:
@@ -269,8 +270,9 @@ def cmd_status(args):
     entries = read_manifest(ch)
     finish(ch)
     print(f"Node {ch.peer_id:08X} at {args.host}: {len(entries)} managed slot entries")
-    for slot, (meta, _h) in sorted(entries.items()):
-        print(f"  slot {slot:4d}  {STATE_NAMES[meta >> 14]:<17} version {meta & 0x3FFF}")
+    for slot, (meta, _h, expires) in sorted(entries.items()):
+        until = f"  guest until {time.ctime(expires)}" if expires else ""
+        print(f"  slot {slot:4d}  {STATE_NAMES[meta >> 14]:<17} version {meta & 0x3FFF}{until}")
 
 
 def cmd_backup(args):
@@ -281,7 +283,7 @@ def cmd_backup(args):
     entries = read_manifest(ch)
     wanted = parse_slots(args.slots)
     slots = {}
-    for slot, (meta, digest) in sorted(entries.items()):
+    for slot, (meta, digest, _expires) in sorted(entries.items()):
         if (meta >> 14) not in (1, 2) or (wanted and slot not in wanted):
             continue
         ch.send(bytes([MSG_TEMPLATE_REQ]) + struct.pack(">H", slot))
@@ -294,11 +296,12 @@ def cmd_backup(args):
             continue
         r_slot, r_meta = struct.unpack(">HH", msg[1:5])
         r_hash = msg[5:13]
-        length = struct.unpack(">H", msg[13:15])[0]
-        data = msg[15 : 15 + length]
+        r_expires = struct.unpack(">I", msg[13:17])[0]
+        length = struct.unpack(">H", msg[17:19])[0]
+        data = msg[19 : 19 + length]
         if r_slot != slot or hashlib.sha256(data).digest()[:8] != r_hash:
             sys.exit(f"slot {slot}: checksum mismatch, backup aborted")
-        slots[str(slot)] = {"meta": r_meta, "template": base64.b64encode(data).decode()}
+        slots[str(slot)] = {"meta": r_meta, "expires": r_expires, "template": base64.b64encode(data).decode()}
         print(f"  slot {slot}: {length} bytes")
     finish(ch)
     write_backup(args.out, key, {"node": f"{ch.peer_id:08X}", "host": args.host, "created": int(time.time()),
@@ -326,7 +329,7 @@ def cmd_restore(args):
         if wanted and slot not in wanted:
             continue
         tpl = base64.b64decode(entry["template"])
-        ch.send(bytes([MSG_RESTORE]) + struct.pack(">HH", slot, len(tpl)) + tpl)
+        ch.send(bytes([MSG_RESTORE]) + struct.pack(">HIH", slot, entry.get("expires", 0), len(tpl)) + tpl)
         while True:
             msg = ch.recv()
             if msg[0] == MSG_RESTORE_ACK:

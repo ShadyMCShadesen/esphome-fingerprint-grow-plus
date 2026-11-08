@@ -104,11 +104,19 @@ fingerprint_sync:
   fingerprint_capacity_sensor: fingerprint_capacity  # recommended: use fingerprint_grow's capacity
   sensor_address: 0xFFFFFFFF       # module address, default 0xFFFFFFFF
   time_id: sntp_time               # optional, needed for the last_sync sensor
-  admin:                           # optional admin finger
-    slot: 0
-    touches: 2                     # matches of the admin finger within `window`
-    window: 5s
+  admin:                           # optional admin fingers (protected, see below)
+    slots: [0, 1]                  # one or more admin slots (`slot: 0` also works)
+    enroll_touches: 2              # gesture -> enroll the next free slot      (0 = off)
+    delete_touches: 3              # gesture -> delete the next finger shown   (0 = off)
+    reenroll_touches: 4            # gesture -> re-enroll the next finger shown (0 = off)
+    guest_touches: 0               # gesture -> enroll a guest (needs guests:) (0 = off)
+    window: 2s                     # pause after the last touch that completes a gesture
+    hold_time: 3s                  # keep the admin finger on the sensor -> on_admin_hold
+    target_timeout: 10s            # time to show the finger for delete / re-enroll
     num_scans: 3
+  guests:                          # optional guest fingers with an expiry date (needs time_id)
+    slots: "150-179"               # at most 64 slots, not overlapping admin slots
+    valid_for: 7d                  # default validity
   on_sync_started: …
   on_sync_done: …
   on_sync_failed: …                # variable: std::string reason
@@ -116,23 +124,68 @@ fingerprint_sync:
   on_slot_updated: …               # variable: uint16_t slot (received/replaced/restored)
   on_slot_deleted: …               # variable: uint16_t slot
   on_enroll_started: …             # variable: uint16_t slot (enroll_next_free / admin finger)
-  on_admin_touch: …                # variable: uint8_t touches (admin finger matched, 1..touches)
+  on_admin_touch: …                # variable: uint8_t touches (admin finger matched, 1..n)
+  on_admin_gesture: …              # variable: uint8_t touches (gesture completed)
+  on_admin_hold: …                 # admin finger held (status display, see health())
+  on_admin_waiting: …              # variable: std::string action ("delete" / "reenroll")
+  on_admin_cancelled: …            # pending admin action aborted or timed out
+  on_admin_done: …                 # variables: std::string action, uint16_t slot
 ```
 
-### Admin finger
+### Admin fingers
 
-`admin.slot` (default 0) only arms enrollment. `fingerprint_grow` still reports the match, so
-exclude that slot from your normal actions:
+Admin fingers only operate the sync; they never open anything. A **gesture** is a number of
+touches of any admin finger, completed by a pause of `window`:
+
+| gesture | default | effect |
+|---|---|---|
+| 2 touches | `enroll_touches` | enroll the next free slot |
+| 3 touches, then a finger | `delete_touches` | that finger is deleted on **all** nodes |
+| 4 touches, then a finger | `reenroll_touches` | that finger is enrolled again into its own slot; the new template replaces it everywhere (slot number unchanged) |
+| n touches | `guest_touches` | enroll a guest finger (see below) |
+| hold ≥ `hold_time` | – | `on_admin_hold`: show the sync status, e.g. via `health()` |
+
+Showing an admin finger instead of the target finger, or no finger within `target_timeout`,
+cancels the action (`on_admin_cancelled`).
+
+Admin slots are **protected**: never chosen by `enroll_next_free` or guests, never a target of
+the delete or re-enroll gesture, refused by `fingerprint_sync.delete`, kept by `delete_all`.
+Only `fingerprint_sync.delete_admin` (with the delete code) removes one. Configure the same
+admin slots on all nodes.
+
+`fingerprint_grow` still reports every match, so keep admin fingers and fingers shown during an
+admin action out of your normal actions:
 
 ```yaml
 fingerprint_grow:
   on_finger_scan_matched:
     - if:
         condition:
-          lambda: "return finger_id != 0;"   # admin finger never opens anything
+          not:
+            or:
+              - fingerprint_sync.is_admin_slot: !lambda return finger_id;
+              - fingerprint_sync.is_admin_busy:
         then:
           - script.execute: open_door
 ```
+
+Status display on hold, with `health()` = 0 in sync, 1 syncing, 2 conflicts, 3 error:
+
+```yaml
+fingerprint_sync:
+  on_admin_hold:
+    - lambda: |-
+        static const uint8_t colors[] = {4, 2, 5, 1};  // green, blue, yellow, red
+        id(grow).aura_led_control(2, 50, colors[id(fp_sync).health()], 5);
+```
+
+### Guest fingers
+
+`fingerprint_sync.enroll_guest` (or the `guest_touches` gesture) enrolls the next free slot of
+the guest range with an expiry date. The date travels with the template to all nodes; every
+node with a valid time deletes the finger on all nodes once it has expired.
+`fingerprint_sync.extend_guest` sets a new validity. Requires `time_id`; with
+`metadata_storage: sensor_notepad` the expiry is kept in RAM only.
 
 The component never controls the LEDs itself. Use the triggers to fit sync feedback into your
 own LED logic.
@@ -149,9 +202,16 @@ own LED logic.
 | `fingerprint_sync.resolve_all_conflicts` | `keep_local` | the same for every conflict of the last round |
 | `fingerprint_sync.claim_all_slots` | – | make this node the reference: every managed slot it holds replaces the peers' template in that slot (initial rollout) |
 | `fingerprint_sync.allow_restore` | `duration` (default 5 min) | accept uploads from `tools/fpsync.py restore` |
+| `fingerprint_sync.delete_next_finger` / `reenroll_next_finger` | – | same as the admin gestures, e.g. from a web button |
+| `fingerprint_sync.cancel_admin` | – | abort a pending admin action |
+| `fingerprint_sync.delete_admin` | `slot`, `code` | delete a protected admin slot on all nodes |
+| `fingerprint_sync.enroll_guest` | `num_scans`, `valid_for` | enroll the next free guest slot |
+| `fingerprint_sync.extend_guest` | `slot`, `valid_for` | new validity for a guest slot |
 | `fingerprint_sync.self_test` | `slot` (default 0), `compare_slot` (optional) | diagnostic on the own sensor (buffers only): checks that a template survives the round trip sensor → ESP → sensor byte-identically |
 
-Conditions: `fingerprint_sync.is_syncing`, `fingerprint_sync.is_ready`.
+Conditions: `fingerprint_sync.is_syncing`, `fingerprint_sync.is_ready`,
+`fingerprint_sync.is_admin_busy`, `fingerprint_sync.is_admin_slot`.
+Lambdas: `id(fp_sync).health()`, `id(fp_sync).slot_expiry(slot)`, `id(fp_sync).next_free_slot()`.
 
 > `fingerprint_grow.delete` / `delete_all` delete **locally only**. The slot is then restored
 > from the peers in the next round. Use `fingerprint_sync.delete` for permanent deletion.

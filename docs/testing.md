@@ -18,13 +18,18 @@ End-to-end scenarios:
    - a node with the wrong key is rejected
    - a dry-run node changes nothing
 2. Conflict resolution.
-3. Admin finger (slot 0 touched twice) enrolls the next free slot, which propagates.
+3. Admin finger (slot 0 touched twice) enrolls the next free slot, which propagates; a second
+   admin finger re-enrolls a slot with 4 touches + finger (new template replaces it everywhere);
+   a guest finger is enrolled, synced and deleted everywhere when it expires; admin slots
+   cannot be deleted (action refused, admin finger as target cancels).
 4. Deletion propagates.
 5. Node offline → catches up after restart; tombstones survive restarts.
 6. Encrypted backup; `delete_all` with a wrong code does nothing, with the right code it wipes
-   all managed slots (exclusive range survives).
+   all managed slots except the admin fingers (exclusive range survives).
 7. Restore from the backup is refused without a restore window, works with one, and propagates.
-8. `SetPwd` is never sent to any sensor.
+8. Hostile peers are cut off (handshake timeout, duplicate manifest).
+9. An admin deletes a finger on all nodes by presenting it after 3 touches.
+10. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
 `fingerprint_grow` and `fingerprint_sync` with synthetic templates (no real biometric data).

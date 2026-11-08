@@ -60,24 +60,8 @@ void FingerprintSyncComponent::setup() {
   this->grow_->add_on_finger_scan_unmatched_callback(activity);
   this->grow_->add_on_finger_scan_misplaced_callback(activity);
   this->grow_->add_on_finger_scan_invalid_callback(activity);
-  this->grow_->add_on_finger_scan_matched_callback([this](uint16_t finger_id, uint16_t confidence) {
-    this->last_activity_ms_ = millis();
-    if (!this->admin_enabled_ || finger_id != this->admin_slot_)
-      return;
-    uint32_t now = millis();
-    if (this->admin_hits_ == 0 || elapsed(now, this->admin_first_ms_, this->admin_window_ms_)) {
-      this->admin_hits_ = 1;
-      this->admin_first_ms_ = now;
-    } else {
-      this->admin_hits_++;
-    }
-    this->admin_touch_cb_.call(this->admin_hits_);
-    if (this->admin_hits_ >= this->admin_touches_) {
-      this->admin_hits_ = 0;
-      ESP_LOGI(TAG, "Admin finger confirmed, starting enrollment of the next free slot");
-      this->enroll_next_free(this->admin_num_scans_);
-    }
-  });
+  this->grow_->add_on_finger_scan_matched_callback(
+      [this](uint16_t finger_id, uint16_t /*confidence*/) { this->on_matched_(finger_id); });
   // Enrollment uses the sensor's character buffers across several loop() calls; no sync job
   // may touch them from the first enrollment scan until the enrollment has finished.
   this->grow_->add_on_enrollment_scan_callback([this](uint8_t, uint16_t) {
@@ -99,6 +83,7 @@ void FingerprintSyncComponent::setup() {
   });
   this->grow_->add_on_enrollment_failed_callback([this](uint16_t) {
     this->enrolling_ = false;
+    this->pending_guest_slot_ = NO_SLOT;
     this->last_activity_ms_ = millis();
   });
 
@@ -121,9 +106,18 @@ void FingerprintSyncComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Metadata storage: %s", this->storage_ ? this->storage_->name() : "?");
   if (this->dry_run_)
     ESP_LOGCONFIG(TAG, "  DRY RUN: nothing is written to or deleted from the sensor by the sync");
+  for (uint16_t slot : this->admin_slots_)
+    ESP_LOGCONFIG(TAG, "  Admin finger: slot %u (protected)", slot);
   if (this->admin_enabled_)
-    ESP_LOGCONFIG(TAG, "  Admin finger: slot %u, %u touches within %" PRIu32 " ms", this->admin_slot_,
-                  this->admin_touches_, this->admin_window_ms_);
+    ESP_LOGCONFIG(TAG,
+                  "  Admin gestures: enroll %u, delete %u, re-enroll %u, guest %u touches; hold %" PRIu32
+                  " ms",
+                  this->enroll_touches_, this->delete_touches_, this->reenroll_touches_, this->guest_touches_,
+                  this->hold_ms_);
+  if (this->guests_enabled_)
+    ESP_LOGCONFIG(TAG, "  Guest slots: %u-%u, default validity %" PRIu32 " h%s", this->guest_from_, this->guest_to_,
+                  this->guest_valid_s_ / 3600,
+                  this->backend_ == MetaBackend::NOTEPAD ? " (expiry not persisted with the notepad)" : "");
   if (this->finger_sensor_ == nullptr)
     ESP_LOGCONFIG(TAG, "  No finger sensor configured: sync jobs only wait for the scan hold-off");
 }
@@ -404,6 +398,7 @@ void FingerprintSyncComponent::job_refresh_index_() {
       this->retry_ms_ = millis();
       return;
     }
+    this->load_expiries_();
     for (uint16_t m : this->meta_)
       this->clock_ = std::max(this->clock_, meta_version(m));
     this->params_loaded_ = true;
@@ -488,6 +483,12 @@ void FingerprintSyncComponent::job_hash_(Job &job) {
 
   if (job.flags & JOB_FLAG_ENROLLED) {
     bool was_present = meta_present(this->meta_[slot]);
+    if (slot == this->pending_guest_slot_) {
+      this->set_expiry_(slot, this->pending_guest_expiry_);
+      this->pending_guest_slot_ = NO_SLOT;
+    } else if (!was_present) {
+      this->set_expiry_(slot, 0);  // a re-enrolled guest keeps its expiry
+    }
     // Enrolling over an occupied slot is a deliberate replacement and may overwrite peers.
     this->meta_[slot] = meta_pack(was_present ? SLOT_PRESENT_FORCED : SLOT_PRESENT, this->next_version_());
     this->conflict_[slot] = false;
@@ -532,6 +533,7 @@ void FingerprintSyncComponent::job_serve_(Job &job) {
   w.u16(slot);
   w.u16(this->meta_[slot]);
   w.bytes(digest, HASH_SIZE);
+  w.u32(this->expires_[slot]);
   w.u16((uint16_t) data.size());
   w.bytes(data.data(), data.size());
   crypto::wipe(data.data(), data.size());
@@ -567,8 +569,9 @@ bool FingerprintSyncComponent::store_verified_(uint8_t buffer, uint16_t slot, co
   return ok;
 }
 
-void FingerprintSyncComponent::apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash) {
+void FingerprintSyncComponent::apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires) {
   this->meta_[slot] = meta;
+  this->set_expiry_(slot, expires);
   memcpy(this->hash_[slot].data(), hash, HASH_SIZE);
   this->hash_known_[slot] = true;
   this->local_present_[slot] = true;
@@ -605,7 +608,7 @@ void FingerprintSyncComponent::job_write_(Job &job) {
     meta = meta_pack(SLOT_PRESENT_FORCED, this->next_version_());
   }
   if (ok) {
-    this->apply_stored_(slot, meta, job.hash.data());
+    this->apply_stored_(slot, meta, job.hash.data(), job.expires);
     ESP_LOGI(TAG, "Slot %u %s (version %u)", slot,
              restore ? "restored" : ((job.flags & JOB_FLAG_REPLACE) ? "replaced from peer" : "received from peer"),
              meta_version(meta));
@@ -664,6 +667,7 @@ void FingerprintSyncComponent::job_delete_(Job &job) {
       this->meta_[slot] = meta;
       this->hash_known_[slot] = false;
       this->conflict_[slot] = false;
+      this->set_expiry_(slot, 0);
       this->mark_dirty_();
     }
   }
@@ -789,6 +793,7 @@ void FingerprintSyncComponent::job_self_test_(Job &job) {
 }
 
 void FingerprintSyncComponent::job_save_meta_() {
+  this->save_expiries_();
   if (!this->storage_->save(this->meta_)) {
     this->error_count_++;
     this->meta_dirty_ = true;  // retry
@@ -811,6 +816,10 @@ void FingerprintSyncComponent::delete_slot(uint16_t slot) {
     ESP_LOGW(TAG, "Cannot delete slot %u (sensor not indexed yet or slot out of range)", slot);
     return;
   }
+  if (this->is_admin_slot(slot)) {
+    ESP_LOGW(TAG, "Slot %u is an admin finger and protected; use fingerprint_sync.delete_admin", slot);
+    return;
+  }
   Job job;
   job.type = JobType::DELETE;
   job.slot = slot;
@@ -825,11 +834,11 @@ void FingerprintSyncComponent::delete_all(const std::string &code) {
   }
   if (!this->params_loaded_)
     return;
-  ESP_LOGW(TAG, "Deleting ALL managed slots on this node and on all peers");
+  ESP_LOGW(TAG, "Deleting ALL managed slots except the admin fingers on this node and on all peers");
   uint16_t queued = 0;
   for (uint16_t slot = 0; slot < this->capacity_; slot++) {
-    if (!this->managed_(slot))
-      continue;
+    if (!this->managed_(slot) || this->is_admin_slot(slot))
+      continue;  // admin fingers survive delete_all
     if (!this->local_present_[slot] && !meta_present(this->meta_[slot])) {
       // Nothing here, but peers may still have it: write a tombstone without a sensor call.
       this->meta_[slot] = meta_pack(SLOT_TOMBSTONE, this->next_version_());
@@ -848,19 +857,7 @@ void FingerprintSyncComponent::delete_all(const std::string &code) {
 }
 
 int32_t FingerprintSyncComponent::next_free_slot() const {
-  if (!this->params_loaded_)
-    return -1;
-  uint16_t to = std::min<uint16_t>(this->enroll_to_, this->capacity_ - 1);
-  for (uint16_t slot = this->enroll_from_; slot <= to; slot++) {
-    if (this->admin_enabled_ && slot == this->admin_slot_)
-      continue;
-    if (this->local_present_[slot] || this->remote_present_[slot] || this->conflict_[slot])
-      continue;
-    if (meta_present(this->meta_[slot]))
-      continue;
-    return slot;
-  }
-  return -1;
+  return this->next_free_in_(this->enroll_from_, this->enroll_to_, false);
 }
 
 void FingerprintSyncComponent::enroll_next_free(uint8_t num_scans) {
@@ -981,7 +978,7 @@ FingerprintSyncComponent::Decision FingerprintSyncComponent::decide_(uint16_t sl
 }
 
 void FingerprintSyncComponent::process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta,
-                                                       const uint8_t *hash) {
+                                                       const uint8_t *hash, uint32_t expires) {
   if (slot >= this->capacity_ || !this->managed_(slot))
     return;
   this->remote_present_[slot] = this->remote_present_[slot] || meta_present(meta);
@@ -994,6 +991,7 @@ void FingerprintSyncComponent::process_manifest_entry_(Session &s, uint16_t slot
       break;
     case Decision::ADOPT:
       this->meta_[slot] = d.meta;
+      this->set_expiry_(slot, meta_present(d.meta) ? expires : 0);
       this->mark_dirty_();
       break;
     case Decision::DELETE: {
@@ -1009,12 +1007,17 @@ void FingerprintSyncComponent::process_manifest_entry_(Session &s, uint16_t slot
       this->flag_conflict_(slot);
       break;
     case Decision::NOTHING:
+      // Same template and version: a node that lost the guest expiry (e.g. no persistence) takes
+      // it over from the peer, so every node can enforce it.
+      if (expires != 0 && meta_present(meta) && meta == this->meta_[slot] && this->expires_[slot] == 0 &&
+          this->hash_known_[slot] && memcmp(this->hash_[slot].data(), hash, HASH_SIZE) == 0)
+        this->set_expiry_(slot, expires);
       break;
   }
 }
 
 void FingerprintSyncComponent::handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash,
-                                                const uint8_t *data, size_t len) {
+                                                uint32_t expires, const uint8_t *data, size_t len) {
   uint8_t digest[32];
   crypto::sha256(data, len, digest);
   if (memcmp(digest, hash, HASH_SIZE) != 0) {
@@ -1027,6 +1030,7 @@ void FingerprintSyncComponent::handle_template_(Session &s, uint16_t slot, uint1
   if (d.kind != Decision::PULL) {
     if (d.kind == Decision::ADOPT) {
       this->meta_[slot] = d.meta;
+      this->set_expiry_(slot, expires);
       this->mark_dirty_();
     }
     return;
@@ -1034,6 +1038,7 @@ void FingerprintSyncComponent::handle_template_(Session &s, uint16_t slot, uint1
   Job job;
   job.slot = slot;
   job.meta = meta;
+  job.expires = expires;
   job.session = s.gen;
   memcpy(job.hash.data(), hash, HASH_SIZE);
   job.data.assign(data, data + len);
@@ -1166,6 +1171,7 @@ void FingerprintSyncComponent::send_manifest_(Session &s) {
       w.u16(this->meta_[slot]);
       static const uint8_t ZERO[HASH_SIZE] = {0};
       w.bytes(meta_present(this->meta_[slot]) ? this->hash_[slot].data() : ZERO, HASH_SIZE);
+      w.u32(this->expires_[slot]);
     }
     this->send_message_(s, msg);
   }
@@ -1195,9 +1201,10 @@ void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uin
       for (uint16_t i = 0; i < count; i++) {
         uint16_t slot, meta;
         uint8_t hash[HASH_SIZE];
-        if (!r.u16(slot) || !r.u16(meta) || !r.bytes(hash, HASH_SIZE))
+        uint32_t expires;
+        if (!r.u16(slot) || !r.u16(meta) || !r.bytes(hash, HASH_SIZE) || !r.u32(expires))
           break;
-        this->process_manifest_entry_(s, slot, meta, hash);
+        this->process_manifest_entry_(s, slot, meta, hash, expires);
       }
       if (r.ok() && (flags & 1)) {
         s.manifest_received = true;
@@ -1225,7 +1232,8 @@ void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uin
     case MSG_TEMPLATE: {
       uint16_t slot, meta, len;
       uint8_t hash[HASH_SIZE];
-      if (!r.u16(slot) || !r.u16(meta) || !r.bytes(hash, HASH_SIZE) || !r.u16(len))
+      uint32_t expires;
+      if (!r.u16(slot) || !r.u16(meta) || !r.bytes(hash, HASH_SIZE) || !r.u32(expires) || !r.u16(len))
         break;
       const uint8_t *data = r.ptr(len);
       if (data == nullptr || len == 0 || len > GrowLink::MAX_TEMPLATE_SIZE)
@@ -1236,7 +1244,7 @@ void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uin
       }
       s.awaiting_template = false;
       if (slot < this->capacity_ && this->managed_(slot))
-        this->handle_template_(s, slot, meta, hash, data, len);
+        this->handle_template_(s, slot, meta, hash, expires, data, len);
       break;
     }
     case MSG_TEMPLATE_NAK: {
@@ -1254,7 +1262,8 @@ void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uin
       break;
     case MSG_RESTORE: {
       uint16_t slot, len;
-      if (!r.u16(slot) || !r.u16(len))
+      uint32_t expires;
+      if (!r.u16(slot) || !r.u32(expires) || !r.u16(len))
         break;
       const uint8_t *data = r.ptr(len);
       if (data == nullptr || len == 0 || len > GrowLink::MAX_TEMPLATE_SIZE)
@@ -1274,6 +1283,7 @@ void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uin
       job.slot = slot;
       job.flags = JOB_FLAG_RESTORE;
       job.session = s.gen;
+      job.expires = expires;
       uint8_t digest[32];
       crypto::sha256(data, len, digest);
       memcpy(job.hash.data(), digest, HASH_SIZE);
@@ -1461,6 +1471,7 @@ void FingerprintSyncComponent::run_round_() {
         ESP_LOGW(TAG, "Sync round given up: the sensor was busy for %" PRIu32 " s",
                  ROUND_REFRESH_TIMEOUT_MS / 1000);
         this->error_count_++;
+        this->last_round_ok_ = false;
         this->sync_failed_cb_.call(std::string("sensor busy"));
         this->set_status_("sensor busy");
         this->publish_diagnostics_();
@@ -1487,6 +1498,7 @@ void FingerprintSyncComponent::run_round_() {
   if (this->peers_reachable_sensor_ != nullptr)
     this->peers_reachable_sensor_->publish_state(this->round_reachable_);
 #endif
+  this->last_round_ok_ = this->round_failures_ == 0;
   if (this->round_failures_ == 0) {
 #ifdef USE_SENSOR
 #ifdef USE_TIME
@@ -1545,6 +1557,9 @@ void FingerprintSyncComponent::loop() {
   this->service_session_(this->inbound_);
   this->service_session_(this->outbound_);
   this->run_round_();
+
+  this->admin_loop_();
+  this->guest_expiry_loop_();
 
   // One sensor job per loop iteration keeps every loop() call short.
   this->run_next_job_();

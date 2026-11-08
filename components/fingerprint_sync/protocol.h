@@ -10,28 +10,28 @@
 
 namespace esphome::fingerprint_sync {
 
-static constexpr uint8_t PROTOCOL_VERSION = 1;
+static constexpr uint8_t PROTOCOL_VERSION = 2;
 
 enum MsgType : uint8_t {
   /// u8 page | u8 flags(bit0 = last page) | u16 capacity | u16 count | count x Entry
-  /// Entry = u16 slot | u16 meta | u8 hash[8]
+  /// Entry = u16 slot | u16 meta | u8 hash[8] | u32 expires (unix time, 0 = never)
   MSG_MANIFEST = 0x01,
   /// u16 slot
   MSG_TEMPLATE_REQ = 0x02,
-  /// u16 slot | u16 meta | u8 hash[8] | u16 len | data[len]
+  /// u16 slot | u16 meta | u8 hash[8] | u32 expires | u16 len | data[len]
   MSG_TEMPLATE = 0x03,
   /// u16 slot | u8 reason
   MSG_TEMPLATE_NAK = 0x04,
   /// no payload: "I need nothing more from you"
   MSG_DONE = 0x05,
-  /// u16 slot | u16 len | data[len]  (only accepted while a restore window is open)
+  /// u16 slot | u32 expires | u16 len | data[len]  (only accepted while a restore window is open)
   MSG_RESTORE = 0x06,
   /// u16 slot | u8 result (0 = ok)
   MSG_RESTORE_ACK = 0x07,
 };
 
 static constexpr size_t HASH_SIZE = 8;
-static constexpr size_t MANIFEST_ENTRY_SIZE = 2 + 2 + HASH_SIZE;
+static constexpr size_t MANIFEST_ENTRY_SIZE = 2 + 2 + HASH_SIZE + 4;
 static constexpr size_t MANIFEST_ENTRIES_PER_PAGE = 64;
 
 /// Packed per-slot metadata: bits 15..14 = state, bits 13..0 = version (Lamport clock).
@@ -63,6 +63,10 @@ class MsgWriter {
     this->buf_.push_back((uint8_t) (v >> 8));
     this->buf_.push_back((uint8_t) v);
   }
+  void u32(uint32_t v) {
+    this->u16((uint16_t) (v >> 16));
+    this->u16((uint16_t) v);
+  }
   void bytes(const uint8_t *data, size_t len) { this->buf_.insert(this->buf_.end(), data, data + len); }
 
  protected:
@@ -83,6 +87,13 @@ class MsgReader {
       return this->bad_();
     v = ((uint16_t) this->data_[this->pos_] << 8) | this->data_[this->pos_ + 1];
     this->pos_ += 2;
+    return true;
+  }
+  bool u32(uint32_t &v) {
+    uint16_t hi, lo;
+    if (!this->u16(hi) || !this->u16(lo))
+      return false;
+    v = ((uint32_t) hi << 16) | lo;
     return true;
   }
   bool bytes(uint8_t *out, size_t len) {

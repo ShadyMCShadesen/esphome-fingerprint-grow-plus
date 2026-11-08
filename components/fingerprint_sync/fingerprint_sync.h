@@ -72,8 +72,11 @@ struct Job {
   uint8_t flags{0};
   uint32_t session{0};
   std::array<uint8_t, HASH_SIZE> hash{};
+  uint32_t expires{0};
   std::vector<uint8_t> data;
 };
+
+enum class AdminArm : uint8_t { NONE, DELETE, REENROLL };
 
 struct Session {
   enum class Phase : uint8_t { IDLE, CONNECTING, HANDSHAKE, SYNC };
@@ -115,12 +118,26 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void set_dry_run(bool dry_run) { this->dry_run_ = dry_run; }
   void set_meta_backend(MetaBackend backend) { this->backend_ = backend; }
   void set_delete_all_code(const char *code) { this->delete_all_code_ = code; }
-  void set_admin(uint16_t slot, uint8_t touches, uint32_t window_ms, uint8_t num_scans) {
+  void add_admin_slot(uint16_t slot) {
     this->admin_enabled_ = true;
-    this->admin_slot_ = slot;
-    this->admin_touches_ = touches;
-    this->admin_window_ms_ = window_ms;
+    this->admin_slots_.push_back(slot);
+  }
+  void set_admin_gestures(uint8_t enroll, uint8_t del, uint8_t reenroll, uint8_t guest, uint32_t gesture_ms,
+                          uint32_t hold_ms, uint32_t target_ms, uint8_t num_scans) {
+    this->enroll_touches_ = enroll;
+    this->delete_touches_ = del;
+    this->reenroll_touches_ = reenroll;
+    this->guest_touches_ = guest;
+    this->gesture_timeout_ms_ = gesture_ms;
+    this->hold_ms_ = hold_ms;
+    this->target_timeout_ms_ = target_ms;
     this->admin_num_scans_ = num_scans;
+  }
+  void set_guests(uint16_t from, uint16_t to, uint32_t valid_s) {
+    this->guests_enabled_ = true;
+    this->guest_from_ = from;
+    this->guest_to_ = to;
+    this->guest_valid_s_ = valid_s;
   }
   void set_enroll_range(uint16_t from, uint16_t to) {
     this->enroll_from_ = from;
@@ -158,6 +175,17 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   template<typename F> void add_on_slot_updated_callback(F &&cb) { this->slot_updated_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_slot_deleted_callback(F &&cb) { this->slot_deleted_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_admin_touch_callback(F &&cb) { this->admin_touch_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_admin_gesture_callback(F &&cb) {
+    this->admin_gesture_cb_.add(std::forward<F>(cb));
+  }
+  template<typename F> void add_on_admin_hold_callback(F &&cb) { this->admin_hold_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_admin_waiting_callback(F &&cb) {
+    this->admin_waiting_cb_.add(std::forward<F>(cb));
+  }
+  template<typename F> void add_on_admin_cancelled_callback(F &&cb) {
+    this->admin_cancelled_cb_.add(std::forward<F>(cb));
+  }
+  template<typename F> void add_on_admin_done_callback(F &&cb) { this->admin_done_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_enroll_started_callback(F &&cb) {
     this->enroll_started_cb_.add(std::forward<F>(cb));
   }
@@ -183,6 +211,29 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void claim_all_slots();
   /// Resolve every conflict found in the last round at once (see resolve_conflict).
   void resolve_all_conflicts(bool keep_local);
+
+  // ---- admin fingers (admin.cpp) ----
+  /// True for the configured admin slots.
+  bool is_admin_slot(uint16_t slot) const;
+  /// True while an admin gesture is being entered or an admin action waits for a finger.
+  /// Use it in on_finger_scan_matched to suppress the normal actions.
+  bool is_admin_busy() const;
+  /// The next matched (non-admin) finger is deleted on all nodes.
+  void delete_next_finger();
+  /// The next matched (non-admin) finger is enrolled again into its own slot (all nodes).
+  void reenroll_next_finger();
+  /// Abort a pending admin action.
+  void cancel_admin();
+  /// Delete an admin slot on all nodes (admin slots are protected otherwise).
+  void delete_admin(uint16_t slot, const std::string &code);
+  /// Enroll the next free guest slot; it is deleted on all nodes after `valid_s` seconds.
+  void enroll_guest(uint8_t num_scans, uint32_t valid_s);
+  /// Set a new validity for an existing guest slot (counted from now).
+  void extend_guest(uint16_t slot, uint32_t valid_s);
+  /// Expiry of a slot as unix time, 0 = never.
+  uint32_t slot_expiry(uint16_t slot) const { return slot < this->expires_.size() ? this->expires_[slot] : 0; }
+  /// 0 = in sync, 1 = sync running, 2 = conflicts, 3 = error (sensor or unreachable peer).
+  uint8_t health() const;
   static constexpr uint16_t NO_SLOT = 0xFFFF;
   /// Lowest free slot inside the enroll range, or -1.
   int32_t next_free_slot() const;
@@ -224,14 +275,30 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   void job_save_meta_();
   void job_self_test_(Job &job);
   bool store_verified_(uint8_t buffer, uint16_t slot, const std::vector<uint8_t> &data);
-  void apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash);
+  void apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires);
 
   // sync logic
   Decision decide_(uint16_t slot, uint16_t remote_meta, const uint8_t *remote_hash) const;
-  void process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash);
-  void handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, const uint8_t *data,
-                        size_t len);
+  void process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires);
+  void handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires,
+                        const uint8_t *data, size_t len);
   void flag_conflict_(uint16_t slot);
+  void set_expiry_(uint16_t slot, uint32_t expires);
+
+  // admin.cpp
+  void on_matched_(uint16_t finger_id);
+  void admin_loop_();
+  void run_gesture_(uint8_t touches);
+  void arm_(AdminArm action);
+  void run_armed_(uint16_t slot);
+  void guest_expiry_loop_();
+  bool time_now_(uint32_t &epoch) const;
+  int32_t next_free_in_(uint16_t from, uint16_t to, bool guests_allowed) const;
+  bool in_guest_range_(uint16_t slot) const {
+    return this->guests_enabled_ && slot >= this->guest_from_ && slot <= this->guest_to_;
+  }
+  void load_expiries_();
+  void save_expiries_();
 
   // sessions
   bool is_self_(const Peer &peer) const;
@@ -258,10 +325,19 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   MetaBackend backend_{MetaBackend::PREFERENCES};
   const char *delete_all_code_{nullptr};
   bool admin_enabled_{false};
-  uint16_t admin_slot_{0};
-  uint8_t admin_touches_{2};
-  uint32_t admin_window_ms_{5000};
+  std::vector<uint16_t> admin_slots_;
+  uint8_t enroll_touches_{2};
+  uint8_t delete_touches_{3};
+  uint8_t reenroll_touches_{4};
+  uint8_t guest_touches_{0};
+  uint32_t gesture_timeout_ms_{2000};
+  uint32_t hold_ms_{3000};
+  uint32_t target_timeout_ms_{10000};
   uint8_t admin_num_scans_{3};
+  bool guests_enabled_{false};
+  uint16_t guest_from_{0};
+  uint16_t guest_to_{0};
+  uint32_t guest_valid_s_{7 * 24 * 3600};
   uint16_t enroll_from_{1};
   uint16_t enroll_to_{0xFFFF};
   binary_sensor::BinarySensor *finger_sensor_{nullptr};
@@ -311,8 +387,17 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   bool enrolling_{false};
   uint32_t last_activity_ms_{0};
   uint32_t retry_ms_{0};
-  uint32_t admin_first_ms_{0};
   uint8_t admin_hits_{0};
+  uint32_t admin_last_ms_{0};
+  bool admin_hold_possible_{false};
+  AdminArm armed_{AdminArm::NONE};
+  uint32_t armed_until_ms_{0};
+  uint16_t pending_guest_slot_{NO_SLOT};
+  uint32_t pending_guest_expiry_{0};
+  uint32_t last_expiry_check_ms_{0};
+  bool last_round_ok_{true};
+  std::vector<uint32_t> expires_;
+  std::vector<ESPPreferenceObject> expiry_prefs_;
   uint32_t restore_until_ms_{0};
   bool restore_open_{false};
   uint32_t error_count_{0};
@@ -342,6 +427,11 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   CallbackManager<void(uint16_t)> slot_deleted_cb_;
   CallbackManager<void(uint16_t)> enroll_started_cb_;
   CallbackManager<void(uint8_t)> admin_touch_cb_;
+  CallbackManager<void(uint8_t)> admin_gesture_cb_;
+  CallbackManager<void()> admin_hold_cb_;
+  CallbackManager<void(std::string)> admin_waiting_cb_;
+  CallbackManager<void()> admin_cancelled_cb_;
+  CallbackManager<void(std::string, uint16_t)> admin_done_cb_;
 };
 
 }  // namespace esphome::fingerprint_sync

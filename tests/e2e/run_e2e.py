@@ -38,7 +38,8 @@ NODES = {
 }
 
 SEEDS = {
-    "node-a": {"0": {"finger": "admin"}, "1": {"finger": "alice"}, "2": {"finger": "bob", "noise": "bob-on-a"}},
+    "node-a": {"0": {"finger": "admin"}, "1": {"finger": "alice"}, "2": {"finger": "bob", "noise": "bob-on-a"},
+               "9": {"finger": "boss"}},
     "node-b": {"2": {"finger": "bob", "noise": "bob-on-b"}, "5": {"finger": "carol"}},
     "node-c": {"2": {"finger": "dave"}, "150": {"finger": "eve"}},
     "node-d": {"7": {"finger": "mallory"}},
@@ -56,6 +57,9 @@ external_components:
       type: local
       path: {components}
     components: [fingerprint_sync]
+time:
+  - platform: host
+    id: host_time
 uart:
   id: uart_bus
   port: {pty}
@@ -95,11 +99,33 @@ fingerprint_sync:
   fingerprint_count_sensor: fp_count
   fingerprint_capacity_sensor: fp_capacity
   delete_all_code: TEST_ALL
+  time_id: host_time
   admin:
-    slot: 0
-    touches: 2
-    window: 6s
+    slots: [0, 9]
+    enroll_touches: 2
+    delete_touches: 3
+    reenroll_touches: 4
+    guest_touches: 5
+    window: 2s
+    target_timeout: 15s
     num_scans: 2
+  guests:
+    slots: "100-109"
+    valid_for: 25s
+  on_admin_gesture:
+    - logger.log:
+        format: "TEST-EVENT admin_gesture %u"
+        args: [touches]
+  on_admin_waiting:
+    - logger.log:
+        format: "TEST-EVENT admin_waiting %s"
+        args: [action.c_str()]
+  on_admin_cancelled:
+    - logger.log: "TEST-EVENT admin_cancelled"
+  on_admin_done:
+    - logger.log:
+        format: "TEST-EVENT admin_done %s %u"
+        args: [action.c_str(), slot]
   on_sync_done:
     - logger.log: "TEST-EVENT sync_done"
   on_sync_failed:
@@ -140,6 +166,7 @@ interval:
           else if (c == "self_test") id(fp_sync).self_test(a, b);
           else if (c == "resolve_all") id(fp_sync).resolve_all_conflicts(a != 0);
           else if (c == "claim_all") id(fp_sync).claim_all_slots();
+          else if (c == "enroll_guest") id(fp_sync).enroll_guest(2, 25);
 """
 
 
@@ -242,6 +269,11 @@ class Cluster:
 
     def cmd(self, name, text):
         self.path(name, "cmd").write_text(text + "\n", encoding="utf-8")
+
+    def touches(self, name, finger, count, gap=1.2):
+        for i in range(count):
+            self.touch(name, finger)
+            time.sleep(gap)
 
     def touch(self, name, finger):
         with open(self.path(name, "ctl"), "a", encoding="utf-8") as f:
@@ -369,6 +401,48 @@ def main():
         results.append(wait_until("frank reached B and C",
                                   lambda: c.slots("node-b").get(3) == "frank" and c.slots("node-c").get(3) == "frank", 60))
 
+        print("== Scenario 3b: second admin finger (boss) re-enrolls slot 3 with 4 touches")
+        old_sha = c.sha("node-a", 3)
+        time.sleep(3)
+        c.touches("node-a", "boss", 4)
+        results.append(wait_until("re-enroll waits for the target finger",
+                                  lambda: "TEST-EVENT admin_waiting reenroll" in c.log("node-a"), 10))
+        c.touch("node-a", "frank")  # target: slot 3
+        results.append(wait_until("re-enrollment of slot 3 started",
+                                  lambda: "TEST-EVENT admin_done reenroll 3" in c.log("node-a"), 10))
+        time.sleep(1.5)
+        c.touches("node-a", "frank", 2, gap=1.5)
+        results.append(wait_until(
+            "slot 3 re-enrolled on A and the new template replaced it on B and C",
+            lambda: c.sha("node-a", 3) not in (None, old_sha)
+            and c.sha("node-b", 3) == c.sha("node-a", 3) == c.sha("node-c", 3), 60))
+
+        print("== Scenario 3c: guest finger with expiry")
+        time.sleep(3)
+        c.cmd("node-a", "enroll_guest")
+        results.append(wait_until("guest enrollment started in slot 100",
+                                  lambda: "TEST-EVENT enroll_started 100" in c.log("node-a"), 10))
+        time.sleep(1.5)
+        c.touches("node-a", "gina", 2, gap=1.5)
+        results.append(wait_until("guest gina reached A, B and C",
+                                  lambda: all(c.slots(n).get(100) == "gina" for n in ("node-a", "node-b", "node-c")),
+                                  45))
+        results.append(wait_until("guest expired and was deleted on all nodes",
+                                  lambda: all(100 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 120))
+
+        print("== Scenario 3d: admin fingers are protected")
+        c.cmd("node-a", "delete 9")
+        time.sleep(3)
+        c.touches("node-b", "admin", 3)
+        results.append(wait_until("delete gesture waits for the target finger",
+                                  lambda: "TEST-EVENT admin_waiting delete" in c.log("node-b"), 10))
+        c.touch("node-b", "boss")  # an admin finger as target aborts
+        results.append(wait_until(
+            "admin slots cannot be deleted (action refused, gesture cancelled)",
+            lambda: "protected" in c.log("node-a") and "TEST-EVENT admin_cancelled" in c.log("node-b")
+            and all(c.slots(n).get(9) == "boss" and c.slots(n).get(0) == "admin" for n in ("node-a", "node-b")),
+            15))
+
         print("== Scenario 4: delete on B propagates")
         c.cmd("node-b", "delete 1")
         results.append(wait_until("slot 1 deleted on A, B, C",
@@ -410,8 +484,9 @@ def main():
         results.append(wait_until("wrong code changes nothing", lambda: c.slots("node-a").get(3) == "frank", 5))
         c.cmd("node-a", "delete_all")
         results.append(wait_until(
-            "all managed slots gone on A, B, C; C's exclusive slot 150 survives",
-            lambda: not c.slots("node-a") and not c.slots("node-b") and c.slots("node-c") == {150: "eve"}, 90))
+            "all managed slots gone on A, B, C except the admin fingers; C's exclusive slot 150 survives",
+            lambda: c.slots("node-a") == {0: "admin", 9: "boss"} and c.slots("node-b") == {0: "admin", 9: "boss"}
+            and c.slots("node-c") == {0: "admin", 9: "boss", 150: "eve"}, 90))
 
         print("== Scenario 7: restore (rollback) from the backup, propagated to all nodes")
         res = subprocess.run(tool + ["restore", "--host", "127.0.0.1", "--port", "18531", "--in", str(backup)],
@@ -467,6 +542,15 @@ def main():
 
         results.append(wait_until("a peer sending its manifest twice is disconnected",
                                   duplicate_manifest_rejected, 1))
+
+        print("== Scenario 9: admin deletes a finger by presenting it (3 touches + finger)")
+        time.sleep(3)
+        c.touches("node-a", "admin", 3)
+        results.append(wait_until("delete gesture armed",
+                                  lambda: c.log("node-a").count("TEST-EVENT admin_waiting delete") >= 1, 10))
+        c.touch("node-a", "frank")
+        results.append(wait_until("frank (slot 3) deleted on A, B and C by the admin gesture",
+                                  lambda: all(3 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 60))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))

@@ -6,6 +6,23 @@ versioning: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Admin gestures: delete a finger on all nodes (3 touches + finger), re-enroll a finger into its
+  own slot (4 touches + finger), status on hold (`on_admin_hold`, `health()`); new triggers
+  `on_admin_gesture`, `on_admin_waiting`, `on_admin_cancelled`, `on_admin_done`; actions
+  `delete_next_finger`, `reenroll_next_finger`, `cancel_admin`; conditions `is_admin_busy`,
+  `is_admin_slot`.
+- Several protected admin fingers (`admin: slots`): never targets of gestures, refused by
+  `delete`, kept by `delete_all`; `delete_admin` removes one with the delete code.
+- Guest fingers with an expiry date (`guests:`, `enroll_guest`, `extend_guest`); the expiry is
+  synced and enforced by every node with a valid time.
+
+### Changed
+- **Protocol version 2** (expiry in MANIFEST, TEMPLATE, RESTORE). Update all nodes and
+  `tools/fpsync.py` together; version 1 and 2 nodes refuse each other.
+- Admin gestures are evaluated after a pause (`window`, default 2 s) instead of acting on the
+  last touch; `admin: touches` is now `enroll_touches` (old name still accepted).
+
+### Added
 - `fingerprint_sync.self_test` action: step-by-step LoadChar/UpChar/DownChar/Match diagnosis on
   the own sensor (buffers only).
 

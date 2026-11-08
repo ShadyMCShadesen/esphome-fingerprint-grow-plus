@@ -73,6 +73,32 @@ gewollt, denn es wird nie geraten.
   `on_finger_scan_matched` den Slot 0 ausschließen (`finger_id != 0`). Für LED-Feedback nach dem
   ersten Auflegen gibt es den Trigger `on_admin_touch`.
 
+## Admin-Finger
+
+Admin-Finger (`admin: slots: [0, 1]`) öffnen nichts, sie bedienen nur den Sync. Eine Geste ist
+eine Anzahl Berührungen, abgeschlossen durch eine kurze Pause:
+
+| Geste | Wirkung |
+|---|---|
+| 2× | nächsten freien Slot einlernen |
+| 3×, dann Finger | dieser Finger wird auf **allen** Stationen gelöscht |
+| 4×, dann Finger | dieser Finger wird im selben Slot neu eingelernt (überall ersetzt) |
+| halten (3 s) | Statusanzeige über `on_admin_hold` und `health()` |
+
+Admin-Finger sind geschützt: kein Löschen per Geste oder `fingerprint_sync.delete`, `delete_all`
+lässt sie stehen. Entfernen nur mit `fingerprint_sync.delete_admin` und Code. In
+`on_finger_scan_matched` die normalen Aktionen mit `fingerprint_sync.is_admin_slot` und
+`fingerprint_sync.is_admin_busy` ausschließen (Beispiel im README).
+
+## Gästefinger
+
+Mit `guests: slots: "150-179"` und `time_id` lernt `fingerprint_sync.enroll_guest` einen Finger
+mit Ablaufdatum ein (Standard `valid_for: 7d`). Das Datum wird an alle Stationen übertragen;
+nach Ablauf wird der Finger überall gelöscht. `fingerprint_sync.extend_guest` verlängert.
+
+**Protokoll Version 2:** Diese Version spricht nicht mit älteren Ständen. Alle Stationen gemeinsam
+aktualisieren.
+
 ## Backup und Restore
 
 ```bash

@@ -1,4 +1,4 @@
-# Sync protocol (version 1)
+# Sync protocol (version 2)
 
 All integers are big endian. Transport: one TCP connection per session, default port 18530.
 
@@ -9,10 +9,13 @@ Every record: `u16 length | body` (length ≤ 2560).
 ### Handshake (plaintext bodies)
 
 ```
-C → S  C_HELLO  "FPS" 0x01 | 0x01 | client_id u32 | nonce_c[16]                  (25 bytes)
-S → C  S_HELLO  "FPS" 0x01 | 0x02 | server_id u32 | nonce_s[16] | proof_s[32]    (57 bytes)
-C → S  C_AUTH   "FPS" 0x01 | 0x03 | proof_c[32]                                   (37 bytes)
+C → S  C_HELLO  "FPS" 0x02 | 0x01 | client_id u32 | nonce_c[16]                  (25 bytes)
+S → C  S_HELLO  "FPS" 0x02 | 0x02 | server_id u32 | nonce_s[16] | proof_s[32]    (57 bytes)
+C → S  C_AUTH   "FPS" 0x02 | 0x03 | proof_c[32]                                   (37 bytes)
 ```
+
+The fourth magic byte is the protocol version; nodes with different versions refuse each other
+(update all nodes together).
 
 - `node_id`: FNV-1 hash of the ESPHome node name. A node refuses a connection from or to its own ID.
 - Key schedule:
@@ -39,16 +42,20 @@ tampered record aborts the session.
 
 | type | name | payload |
 |---|---|---|
-| 0x01 | MANIFEST | `u8 page, u8 flags (bit0 = last), u16 capacity, u16 count, count × (u16 slot, u16 meta, u8 hash[8])` |
+| 0x01 | MANIFEST | `u8 page, u8 flags (bit0 = last), u16 capacity, u16 count, count × (u16 slot, u16 meta, u8 hash[8], u32 expires)` |
 | 0x02 | TEMPLATE_REQ | `u16 slot` |
-| 0x03 | TEMPLATE | `u16 slot, u16 meta, u8 hash[8], u16 len, u8 data[len]` |
+| 0x03 | TEMPLATE | `u16 slot, u16 meta, u8 hash[8], u32 expires, u16 len, u8 data[len]` |
 | 0x04 | TEMPLATE_NAK | `u16 slot, u8 reason` |
 | 0x05 | DONE | – |
-| 0x06 | RESTORE | `u16 slot, u16 len, u8 data[len]` (accepted only in a restore window) |
+| 0x06 | RESTORE | `u16 slot, u32 expires, u16 len, u8 data[len]` (accepted only in a restore window) |
 | 0x07 | RESTORE_ACK | `u16 slot, u8 result` (0 ok, 1 failed, 2 refused) |
 
 - `meta = state << 14 | version` with state 0 none, 1 present, 2 present-forced, 3 tombstone.
 - `hash` = first 8 bytes of SHA-256(template). Zero for tombstones.
+- `expires` = unix time after which a guest finger is deleted, 0 = never. It belongs to the slot
+  version: a node adopting a version adopts its expiry.
+
+Version history: 1 = initial; 2 = `expires` added to MANIFEST, TEMPLATE and RESTORE.
 
 ### Session flow
 

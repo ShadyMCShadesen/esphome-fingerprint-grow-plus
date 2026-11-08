@@ -55,6 +55,20 @@ CONF_ON_SLOT_UPDATED = "on_slot_updated"
 CONF_ON_SLOT_DELETED = "on_slot_deleted"
 CONF_ON_ENROLL_STARTED = "on_enroll_started"
 CONF_ON_ADMIN_TOUCH = "on_admin_touch"
+CONF_ON_ADMIN_GESTURE = "on_admin_gesture"
+CONF_ON_ADMIN_HOLD = "on_admin_hold"
+CONF_ON_ADMIN_WAITING = "on_admin_waiting"
+CONF_ON_ADMIN_CANCELLED = "on_admin_cancelled"
+CONF_ON_ADMIN_DONE = "on_admin_done"
+CONF_SLOTS = "slots"
+CONF_ENROLL_TOUCHES = "enroll_touches"
+CONF_DELETE_TOUCHES = "delete_touches"
+CONF_REENROLL_TOUCHES = "reenroll_touches"
+CONF_GUEST_TOUCHES = "guest_touches"
+CONF_HOLD_TIME = "hold_time"
+CONF_TARGET_TIMEOUT = "target_timeout"
+CONF_GUESTS = "guests"
+CONF_VALID_FOR = "valid_for"
 
 DEFAULT_PORT = 18530
 
@@ -116,14 +130,54 @@ PEER_SCHEMA = cv.Schema(
     }
 )
 
-ADMIN_SCHEMA = cv.Schema(
+_TOUCHES = cv.int_range(min=0, max=10)
+
+
+def _validate_admin(config):
+    config = dict(config)
+    slots = list(config.pop(CONF_SLOTS, []))
+    if CONF_SLOT in config:
+        slots.append(config.pop(CONF_SLOT))
+    config[CONF_SLOTS] = sorted(set(slots)) or [0]
+    if CONF_TOUCHES in config:  # older name of enroll_touches
+        config[CONF_ENROLL_TOUCHES] = config.pop(CONF_TOUCHES)
+    config.setdefault(CONF_ENROLL_TOUCHES, 2)
+    used = [
+        config[k]
+        for k in (CONF_ENROLL_TOUCHES, CONF_DELETE_TOUCHES, CONF_REENROLL_TOUCHES, CONF_GUEST_TOUCHES)
+        if config[k] > 0
+    ]
+    if len(used) != len(set(used)):
+        raise cv.Invalid("every admin gesture needs its own number of touches (0 = disabled)")
+    return config
+
+
+ADMIN_SCHEMA = cv.All(
+    cv.Schema(
+        {
+            cv.Optional(CONF_SLOT): cv.uint16_t,
+            cv.Optional(CONF_SLOTS): cv.All(cv.ensure_list(cv.uint16_t), cv.Length(min=1, max=10)),
+            cv.Optional(CONF_TOUCHES): _TOUCHES,
+            cv.Optional(CONF_ENROLL_TOUCHES): _TOUCHES,
+            cv.Optional(CONF_DELETE_TOUCHES, default=3): _TOUCHES,
+            cv.Optional(CONF_REENROLL_TOUCHES, default=4): _TOUCHES,
+            cv.Optional(CONF_GUEST_TOUCHES, default=0): _TOUCHES,
+            # Pause after the last touch that completes a gesture.
+            cv.Optional(CONF_WINDOW, default="2s"): cv.positive_time_period_milliseconds,
+            # Keep the admin finger on the sensor this long for on_admin_hold (needs finger_sensor).
+            cv.Optional(CONF_HOLD_TIME, default="3s"): cv.positive_time_period_milliseconds,
+            # Time to present the target finger for delete / re-enroll.
+            cv.Optional(CONF_TARGET_TIMEOUT, default="10s"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_NUM_SCANS, default=3): cv.int_range(min=1, max=6),
+        }
+    ),
+    _validate_admin,
+)
+
+GUESTS_SCHEMA = cv.Schema(
     {
-        cv.Optional(CONF_SLOT, default=0): cv.uint16_t,
-        cv.Optional(CONF_TOUCHES, default=2): cv.int_range(min=1, max=10),
-        cv.Optional(
-            CONF_WINDOW, default="5s"
-        ): cv.positive_time_period_milliseconds,
-        cv.Optional(CONF_NUM_SCANS, default=3): cv.int_range(min=1, max=6),
+        cv.Required(CONF_SLOTS): validate_slot_range,
+        cv.Optional(CONF_VALID_FOR, default="7d"): cv.positive_time_period_seconds,
     }
 )
 
@@ -138,6 +192,15 @@ def _default_metadata_storage(config):
 
 
 def _validate(config):
+    if guests := config.get(CONF_GUESTS):
+        low, high = guests[CONF_SLOTS]
+        if CONF_TIME_ID not in config:
+            raise cv.Invalid("guests need time_id (expiry dates)", path=[CONF_GUESTS])
+        if high - low >= 64:
+            raise cv.Invalid("at most 64 guest slots", path=[CONF_GUESTS, CONF_SLOTS])
+        admin_slots = config.get(CONF_ADMIN, {}).get(CONF_SLOTS, [])
+        if any(low <= a <= high for a in admin_slots):
+            raise cv.Invalid("admin slots must not be inside the guest range", path=[CONF_GUESTS])
     if CORE.is_esp8266 and config[CONF_METADATA_STORAGE] == "preferences":
         raise cv.Invalid(
             "ESP8266 has only 512 bytes of flash preferences; use "
@@ -182,6 +245,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_SENSOR_ADDRESS, default=0xFFFFFFFF): cv.hex_uint32_t,
             cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
             cv.Optional(CONF_ADMIN): ADMIN_SCHEMA,
+            cv.Optional(CONF_GUESTS): GUESTS_SCHEMA,
             cv.Optional(CONF_ON_SYNC_STARTED): automation.validate_automation({}),
             cv.Optional(CONF_ON_SYNC_DONE): automation.validate_automation({}),
             cv.Optional(CONF_ON_SYNC_FAILED): automation.validate_automation({}),
@@ -190,6 +254,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ON_SLOT_DELETED): automation.validate_automation({}),
             cv.Optional(CONF_ON_ENROLL_STARTED): automation.validate_automation({}),
             cv.Optional(CONF_ON_ADMIN_TOUCH): automation.validate_automation({}),
+            cv.Optional(CONF_ON_ADMIN_GESTURE): automation.validate_automation({}),
+            cv.Optional(CONF_ON_ADMIN_HOLD): automation.validate_automation({}),
+            cv.Optional(CONF_ON_ADMIN_WAITING): automation.validate_automation({}),
+            cv.Optional(CONF_ON_ADMIN_CANCELLED): automation.validate_automation({}),
+            cv.Optional(CONF_ON_ADMIN_DONE): automation.validate_automation({}),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -226,6 +295,19 @@ _CALLBACK_AUTOMATIONS = (
     ),
     automation.CallbackAutomation(
         CONF_ON_ADMIN_TOUCH, "add_on_admin_touch_callback", [(cg.uint8, "touches")]
+    ),
+    automation.CallbackAutomation(
+        CONF_ON_ADMIN_GESTURE, "add_on_admin_gesture_callback", [(cg.uint8, "touches")]
+    ),
+    automation.CallbackAutomation(CONF_ON_ADMIN_HOLD, "add_on_admin_hold_callback"),
+    automation.CallbackAutomation(
+        CONF_ON_ADMIN_WAITING, "add_on_admin_waiting_callback", [(cg.std_string, "action")]
+    ),
+    automation.CallbackAutomation(CONF_ON_ADMIN_CANCELLED, "add_on_admin_cancelled_callback"),
+    automation.CallbackAutomation(
+        CONF_ON_ADMIN_DONE,
+        "add_on_admin_done_callback",
+        [(cg.std_string, "action"), (cg.uint16, "slot")],
     ),
 )
 
@@ -280,14 +362,23 @@ async def to_code(config):
     if CONF_TIME_ID in config:
         cg.add(var.set_time(await cg.get_variable(config[CONF_TIME_ID])))
     if admin := config.get(CONF_ADMIN):
+        for slot in admin[CONF_SLOTS]:
+            cg.add(var.add_admin_slot(slot))
         cg.add(
-            var.set_admin(
-                admin[CONF_SLOT],
-                admin[CONF_TOUCHES],
+            var.set_admin_gestures(
+                admin[CONF_ENROLL_TOUCHES],
+                admin[CONF_DELETE_TOUCHES],
+                admin[CONF_REENROLL_TOUCHES],
+                admin[CONF_GUEST_TOUCHES],
                 admin[CONF_WINDOW],
+                admin[CONF_HOLD_TIME],
+                admin[CONF_TARGET_TIMEOUT],
                 admin[CONF_NUM_SCANS],
             )
         )
+    if guests := config.get(CONF_GUESTS):
+        low, high = guests[CONF_SLOTS]
+        cg.add(var.set_guests(low, high, guests[CONF_VALID_FOR]))
     if networks := config.get(CONF_ALLOWED_NETWORKS):
         socket.add_ipv4_allow(var.set_allowed_networks, networks, config[CONF_ID])
 
@@ -414,6 +505,76 @@ automation.register_apply_action(
         }
     ),
     automation.ApplyField(CONF_KEEP_LOCAL, "resolve_all_conflicts", cg.bool_),
+)
+
+automation.register_apply_action(
+    "fingerprint_sync.delete_next_finger", _PARENT_SCHEMA, automation.ApplyCall("delete_next_finger()")
+)
+automation.register_apply_action(
+    "fingerprint_sync.reenroll_next_finger",
+    _PARENT_SCHEMA,
+    automation.ApplyCall("reenroll_next_finger()"),
+)
+automation.register_apply_action(
+    "fingerprint_sync.cancel_admin", _PARENT_SCHEMA, automation.ApplyCall("cancel_admin()")
+)
+automation.register_apply_action(
+    "fingerprint_sync.delete_admin",
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.Required(CONF_SLOT): cv.templatable(cv.uint16_t),
+            cv.Required(CONF_CODE): cv.templatable(cv.string),
+        }
+    ),
+    automation.ApplyCall(
+        "delete_admin({}, {})", ((CONF_SLOT, cg.uint16), (CONF_CODE, cg.std_string))
+    ),
+)
+automation.register_apply_action(
+    "fingerprint_sync.enroll_guest",
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.Optional(CONF_NUM_SCANS, default=3): cv.templatable(cv.int_range(min=1, max=6)),
+            cv.Optional(CONF_VALID_FOR, default="7d"): cv.templatable(
+                cv.positive_time_period_seconds
+            ),
+        }
+    ),
+    automation.ApplyCall(
+        "enroll_guest({}, {})", ((CONF_NUM_SCANS, cg.uint8), (CONF_VALID_FOR, cg.uint32))
+    ),
+)
+automation.register_apply_action(
+    "fingerprint_sync.extend_guest",
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.Required(CONF_SLOT): cv.templatable(cv.uint16_t),
+            cv.Optional(CONF_VALID_FOR, default="7d"): cv.templatable(
+                cv.positive_time_period_seconds
+            ),
+        }
+    ),
+    automation.ApplyCall(
+        "extend_guest({}, {})", ((CONF_SLOT, cg.uint16), (CONF_VALID_FOR, cg.uint32))
+    ),
+)
+
+automation.register_apply_condition(
+    "fingerprint_sync.is_admin_busy", _PARENT_SCHEMA, "is_admin_busy()"
+)
+automation.register_apply_condition(
+    "fingerprint_sync.is_admin_slot",
+    cv.maybe_simple_value(
+        {
+            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.Required(CONF_SLOT): cv.templatable(cv.uint16_t),
+        },
+        key=CONF_SLOT,
+    ),
+    automation.ApplyCall("is_admin_slot({})", ((CONF_SLOT, cg.uint16),)),
 )
 
 automation.register_apply_condition(
