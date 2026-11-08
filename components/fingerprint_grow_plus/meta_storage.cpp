@@ -7,7 +7,7 @@
 namespace esphome::fingerprint_grow_plus {
 
 static const char *const TAG = "fingerprint_grow_plus.store";
-static const uint8_t NOTEPAD_MAGIC[4] = {'F', 'P', 'S', 'M'};
+static const uint8_t NOTEPAD_MAGIC[4] = {'F', 'G', 'P', 'M'};
 
 void PreferenceStorage::ensure_prefs_(size_t chunks) {
   while (this->prefs_.size() < chunks) {

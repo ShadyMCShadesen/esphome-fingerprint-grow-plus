@@ -10,7 +10,7 @@
 
 namespace esphome::fingerprint_grow_plus {
 
-static constexpr uint8_t PROTOCOL_VERSION = 2;
+static constexpr uint8_t PROTOCOL_VERSION = 3;
 
 enum MsgType : uint8_t {
   /// u8 page | u8 flags(bit0 = last page) | u16 capacity | u16 count | count x Entry

@@ -2,7 +2,7 @@
 
 ## Recommended rollout
 
-1. **Key.** Run `python3 tools/fpsync.py genkey` and put the key into `secrets.yaml` as
+1. **Key.** Run `python3 tools/growplus.py genkey` and put the key into `secrets.yaml` as
    `fingerprint_grow_plus_key`.
 2. **Two nodes first, dry run.** Add `fingerprint_grow_plus` with `dry_run: true` to two nodes of the
    same hardware and flash them.
@@ -17,9 +17,9 @@
    repository):
 
    ```bash
-   export FPSYNC_KEY='<key from secrets.yaml>'
-   python3 tools/fpsync.py backup --host <node>.local --out <node>-$(date +%F).fpsb
-   python3 tools/fpsync.py inspect --in <node>-$(date +%F).fpsb
+   export GROWPLUS_KEY='<key from secrets.yaml>'
+   python3 tools/growplus.py backup --host <node>.local --out <node>-$(date +%F).fgpb
+   python3 tools/growplus.py inspect --in <node>-$(date +%F).fgpb
    ```
 
 5. **Hardware checks.** Run the compatibility tests in [testing.md](testing.md) (A1–A4).
@@ -42,7 +42,7 @@
 2. Restore:
 
    ```bash
-   python3 tools/fpsync.py restore --host <node>.local --in backup.fpsb [--slots 0,2,10-19]
+   python3 tools/growplus.py restore --host <node>.local --in backup.fgpb [--slots 0,2,10-19]
    ```
 
 3. Restored slots get a new, forced version. **They replace the slot on all peers**, which is the

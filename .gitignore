@@ -11,7 +11,7 @@ steuerung-*.yaml
 *.private.yaml
 
 # Biometric data: template dumps and backups
-*.fpsb
+*.fgpb
 *.tpl
 *.template
 *.fpt

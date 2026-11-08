@@ -310,7 +310,7 @@ void FingerprintGrowPlusComponent::load_expiries_() {
   if (this->backend_ != MetaBackend::PREFERENCES)
     return;
   const size_t chunks = (this->capacity_ + EXPIRY_PREF_CHUNK - 1) / EXPIRY_PREF_CHUNK;
-  const uint32_t base = fnv1_hash("fingerprint_sync_expiry") ^ this->node_id_;
+  const uint32_t base = fnv1_hash("fingerprint_grow_plus_expiry") ^ this->node_id_;
   for (size_t c = 0; c < chunks; c++) {
     this->expiry_prefs_.push_back(
         global_preferences->make_preference<std::array<uint32_t, EXPIRY_PREF_CHUNK>>(base + c, true));

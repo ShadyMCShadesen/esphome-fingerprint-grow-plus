@@ -182,7 +182,7 @@ class Cluster:
     def path(self, name, suffix):
         if suffix == "pty":
             # The host UART only accepts a device path directly below a top-level directory.
-            return Path(f"/tmp/fpsync-e2e-{name}.pty")
+            return Path(f"/tmp/growplus-e2e-{name}.pty")
         return OUT / f"{name}.{suffix}"
 
     def generate_and_compile(self):
@@ -473,10 +473,10 @@ def main():
                                   lambda: all(s not in c.slots(n) for n in ("node-a", "node-b", "node-c") for s in (1, 5)),
                                   20))
 
-        print("== Scenario 6a: encrypted backup of node A with tools/fpsync.py")
-        backup = OUT / "node-a.fpsb"
-        tool = [sys.executable, str(ROOT / "tools" / "fpsync.py")]
-        env = dict(os.environ, FPSYNC_KEY=KEY)
+        print("== Scenario 6a: encrypted backup of node A with tools/growplus.py")
+        backup = OUT / "node-a.fgpb"
+        tool = [sys.executable, str(ROOT / "tools" / "growplus.py")]
+        env = dict(os.environ, GROWPLUS_KEY=KEY)
         res = subprocess.run(tool + ["backup", "--host", "127.0.0.1", "--port", "18531", "--out", str(backup)],
                              capture_output=True, text=True, env=env, check=False)
         print(res.stdout + res.stderr)
@@ -517,7 +517,7 @@ def main():
         print("== Scenario 8: hostile peers are cut off (handshake timeout, duplicate manifest)")
         import socket as _socket
         sys.path.insert(0, str(ROOT / "tools"))
-        import fpsync  # noqa: E402
+        import growplus  # noqa: E402
 
         def silent_connection_closed():
             sock = _socket.create_connection(("127.0.0.1", 18532), timeout=12)
@@ -535,9 +535,9 @@ def main():
 
         def duplicate_manifest_rejected():
             sock = _socket.create_connection(("127.0.0.1", 18532), timeout=10)
-            ch = fpsync.Channel(sock, __import__("base64").b64decode(KEY), 0x1234)
+            ch = growplus.Channel(sock, __import__("base64").b64decode(KEY), 0x1234)
             ch.handshake()
-            empty = bytes([fpsync.MSG_MANIFEST, 0, 1, 0, 200, 0, 0])
+            empty = bytes([growplus.MSG_MANIFEST, 0, 1, 0, 200, 0, 0])
             ch.send(empty)
             ch.send(empty)
             try:

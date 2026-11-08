@@ -9,7 +9,12 @@ versioning: [Semantic Versioning](https://semver.org/).
 - **Renamed to `fingerprint_grow_plus`** (repository `esphome-fingerprint-grow-plus`): the component
   is an extension of `fingerprint_grow`, and the sync is one optional part. Replace
   `fingerprint_sync` with `fingerprint_grow_plus` in YAML (block, actions, conditions, sensor
-  platforms). Stored metadata, guest expiry dates, backups and the sync protocol are unchanged.
+  platforms).
+- **Protocol version 3**: magic `FGP`, HKDF salt `growplus-v1`. Update all nodes together.
+- Tool `tools/fpsync.py` is now `tools/growplus.py` (env `GROWPLUS_KEY`, files `.fgpb`); backups
+  made with `fpsync.py` cannot be read any more.
+- Preference keys renamed: slot versions, tombstones and guest expiry dates start fresh after the
+  update. Synced sensors with identical templates converge without conflicts.
 
 ### Added
 - Stand-alone mode: without `key` the node opens no network port and uses admin fingers, guests,

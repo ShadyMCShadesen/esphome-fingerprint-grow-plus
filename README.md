@@ -12,7 +12,9 @@ Assistant, MQTT broker or cloud service).
 > fingers, read [First rollout](#first-rollout-on-sensors-that-already-hold-fingers).
 
 > **Renamed:** this project was called `fingerprint_sync`. Replace `fingerprint_sync` with
-> `fingerprint_grow_plus` in your YAML; stored data, backups and the sync protocol are unchanged.
+> `fingerprint_grow_plus` in your YAML and update all nodes together (sync protocol 3). Slot
+> versions and guest expiry dates start fresh, backups made with `fpsync.py` cannot be read by
+> `tools/growplus.py`: make a new backup after the update.
 
 ## How it works
 
@@ -54,7 +56,7 @@ gestures, deletions and guest expiry then apply to all nodes.
   protection, optional source network allow list, templates never logged.
 - **Verified writes**: checksum on arrival, read back byte for byte after storing.
 - **Routable**: one TCP port; peers as mDNS `.local` names, DNS names or IPv4 addresses.
-- **Backup / restore tool** `tools/fpsync.py` (Python standard library only, encrypted files).
+- **Backup / restore tool** `tools/growplus.py` (Python standard library only, encrypted files).
 
 ## Quick start
 
@@ -78,7 +80,7 @@ Touch the admin finger twice and lift it: the next free slot is enrolled. See
 1. Create a key once and put it into `secrets.yaml` (same value for all nodes):
 
    ```bash
-   python3 tools/fpsync.py genkey
+   python3 tools/growplus.py genkey
    ```
 
    ```yaml
@@ -99,7 +101,7 @@ Touch the admin finger twice and lift it: the next free slot is enrolled. See
 
 3. Flash all nodes and read the logs: `Index ready`, `Sync with … finished`,
    `[dry run] would store slot …`, possibly `CONFLICT in slot …`.
-4. Back up every sensor (`tools/fpsync.py backup`, see [docs/operations.md](docs/operations.md)),
+4. Back up every sensor (`tools/growplus.py backup`, see [docs/operations.md](docs/operations.md)),
    then set `dry_run: false`.
 
 `uart_id` and `fingerprint_grow_id` are only needed if a node has more than one UART or
@@ -286,7 +288,7 @@ fingerprint_grow_plus:
 | `fingerprint_grow_plus.claim_all_slots` | – | this node's slots replace the same slots everywhere |
 | `fingerprint_grow_plus.resolve_conflict` | `slot`, `keep_local` | `true`: this node wins; `false`: take the peer's finger |
 | `fingerprint_grow_plus.resolve_all_conflicts` | `keep_local` | the same for all current conflicts |
-| `fingerprint_grow_plus.allow_restore` | `duration` (5min) | accept uploads from `tools/fpsync.py restore` |
+| `fingerprint_grow_plus.allow_restore` | `duration` (5min) | accept uploads from `tools/growplus.py restore` |
 | `fingerprint_grow_plus.self_test` | `slot` (0), `compare_slot` | diagnostic: template round trip on the own sensor, no slot written |
 
 Conditions: `fingerprint_grow_plus.is_syncing`, `is_ready`, `is_admin_busy`, `is_admin_slot`.
@@ -319,8 +321,8 @@ binary_sensor:
   creates a conflict; `enroll_next_free` and the admin gesture avoid this.
 - **Blocking**: one sensor job per loop iteration; writing a template blocks the loop for up to
   about 1.3 s. No job starts while a finger is on the sensor or an enrollment runs.
-- **Upgrading**: the sync protocol has a version (currently 2). Nodes with different versions
-  refuse each other, so update all nodes and `tools/fpsync.py` together.
+- **Upgrading**: the sync protocol has a version (currently 3). Nodes with different versions
+  refuse each other, so update all nodes and `tools/growplus.py` together.
 
 ## Platforms and tested hardware
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that tools/fpsync.py produces byte-identical records to the C++ SecureChannel.
+"""Check that tools/growplus.py produces byte-identical records to the C++ SecureChannel.
 
 Usage: python3 tests/test_interop.py /path/to/test_crypto   (built by tests/run_unit_tests.sh)
 """
@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import fpsync  # noqa: E402
+import growplus  # noqa: E402
 
 
 def main(binary: str) -> int:
@@ -24,19 +24,19 @@ def main(binary: str) -> int:
     ns = bytes(range(0x80, 0x90))
     cid, sid = 0x11223344, 0x55667788
 
-    c_hello = fpsync.MAGIC + b"\x01" + struct.pack(">I", cid) + nc
-    keys = fpsync.hkdf(b"fpsync-v1", psk, nc + ns + struct.pack(">II", cid, sid), 160)
+    c_hello = growplus.MAGIC + b"\x01" + struct.pack(">I", cid) + nc
+    keys = growplus.hkdf(b"growplus-v1", psk, nc + ns + struct.pack(">II", cid, sid), 160)
     k_auth, enc_c2s, mac_c2s, enc_s2c, mac_s2c = (keys[i : i + 32] for i in range(0, 160, 32))
-    s_prefix = fpsync.MAGIC + b"\x02" + struct.pack(">I", sid) + ns
+    s_prefix = growplus.MAGIC + b"\x02" + struct.pack(">I", sid) + ns
     s_hello = s_prefix + hmac.new(k_auth, b"server" + c_hello + s_prefix, hashlib.sha256).digest()
-    c_auth = fpsync.MAGIC + b"\x03" + hmac.new(k_auth, b"client" + c_hello + s_hello, hashlib.sha256).digest()
+    c_auth = growplus.MAGIC + b"\x03" + hmac.new(k_auth, b"client" + c_hello + s_hello, hashlib.sha256).digest()
 
     def record(body: bytes) -> str:
         return (struct.pack(">H", len(body)) + body).hex()
 
     def sealed(enc: bytes, mac: bytes, seq: int, msg: bytes) -> str:
         s = struct.pack(">I", seq)
-        ct = fpsync.chacha20_xor(enc, s + bytes(8), 0, msg)
+        ct = growplus.chacha20_xor(enc, s + bytes(8), 0, msg)
         body_len = 4 + len(ct) + 16
         tag = hmac.new(mac, struct.pack(">H", body_len) + s + ct, hashlib.sha256).digest()[:16]
         return record(s + ct + tag)

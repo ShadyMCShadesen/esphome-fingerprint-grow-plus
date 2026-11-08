@@ -17,15 +17,16 @@ fingerprint_grow_plus:
 
 **Umbenennung:** Früher hieß die Komponente `fingerprint_sync`. In bestehenden YAMLs
 `fingerprint_sync` durch `fingerprint_grow_plus` ersetzen (Block, Aktionen, Bedingungen,
-Sensor-Plattformen) und die neue Repo-URL verwenden. Gespeicherte Versionen, Ablaufdaten und
-Backups bleiben gültig, das Sync-Protokoll ist unverändert.
+Sensor-Plattformen) und die neue Repo-URL verwenden. Alle Stationen gemeinsam aktualisieren
+(Protokoll 3). Slot-Versionen und Ablaufdaten beginnen neu; alte `fpsync.py`-Backups kann
+`tools/growplus.py` nicht lesen, daher nach dem Update ein neues Backup ziehen.
 
 ## Einrichtung mit Sync
 
 1. Schlüssel erzeugen und in die `secrets.yaml` aller Geräte eintragen:
 
    ```bash
-   python3 tools/fpsync.py genkey
+   python3 tools/growplus.py genkey
    ```
 
    ```yaml
@@ -111,17 +112,17 @@ Mit `guests: "150-179"` und `time_id` lernt `fingerprint_grow_plus.enroll_guest`
 Admin-Geste 5×) einen Finger mit Ablaufdatum ein (Standard `valid_for: 7d`). Das Datum wird an alle Stationen übertragen;
 nach Ablauf wird der Finger überall gelöscht. `fingerprint_grow_plus.extend_guest` verlängert.
 
-**Protokoll Version 2:** Diese Version spricht nicht mit älteren Ständen. Alle Stationen gemeinsam
+**Protokoll Version 3:** Diese Version spricht nicht mit älteren Ständen. Alle Stationen gemeinsam
 aktualisieren.
 
 ## Backup und Restore
 
 ```bash
-export FPSYNC_KEY='<Schlüssel>'
-python3 tools/fpsync.py backup  --host <geraet>.local --out <geraet>.fpsb
-python3 tools/fpsync.py inspect --in <geraet>.fpsb
+export GROWPLUS_KEY='<Schlüssel>'
+python3 tools/growplus.py backup  --host <geraet>.local --out <geraet>.fgpb
+python3 tools/growplus.py inspect --in <geraet>.fgpb
 # am Gerät zuerst fingerprint_grow_plus.allow_restore auslösen, dann:
-python3 tools/fpsync.py restore --host <geraet>.local --in <geraet>.fpsb
+python3 tools/growplus.py restore --host <geraet>.local --in <geraet>.fgpb
 ```
 
 Backup-Dateien sind verschlüsselt, enthalten aber biometrische Daten: nie in ein Repository legen.

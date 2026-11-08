@@ -51,7 +51,7 @@ void FingerprintGrowPlusComponent::setup() {
   if (this->backend_ == MetaBackend::NOTEPAD) {
     this->storage_ = std::make_unique<NotepadStorage>(&this->link_);
   } else {
-    this->storage_ = std::make_unique<PreferenceStorage>(fnv1_hash("fingerprint_sync_meta") ^ this->node_id_);
+    this->storage_ = std::make_unique<PreferenceStorage>(fnv1_hash("fingerprint_grow_plus_meta") ^ this->node_id_);
   }
   if (this->network_)
     this->transport_.setup(TAG);

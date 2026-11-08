@@ -6,8 +6,8 @@
 namespace esphome::fingerprint_grow_plus {
 
 // The last byte is the protocol version: nodes with different versions refuse each other.
-static const uint8_t MAGIC[4] = {'F', 'P', 'S', 0x02};
-static const uint8_t HKDF_SALT[] = {'f', 'p', 's', 'y', 'n', 'c', '-', 'v', '1'};
+static const uint8_t MAGIC[4] = {'F', 'G', 'P', 0x03};
+static const uint8_t HKDF_SALT[] = {'g', 'r', 'o', 'w', 'p', 'l', 'u', 's', '-', 'v', '1'};
 static constexpr uint8_t HS_C_HELLO = 0x01;
 static constexpr uint8_t HS_S_HELLO = 0x02;
 static constexpr uint8_t HS_C_AUTH = 0x03;

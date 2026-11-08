@@ -13,7 +13,7 @@ no broker, no cloud). Without `key` a node runs stand-alone (no network port).
   - `protocol.h` messages and slot metadata encoding; `meta_storage.*` persistence
   - `fingerprint_grow_plus.*` job queue, sync decisions, sessions, rounds
   - `__init__.py`, `sensor.py`, `text_sensor.py`, `binary_sensor.py` codegen
-- `tools/fpsync.py` backup/restore/status CLI (stdlib only, must stay byte-compatible)
+- `tools/growplus.py` backup/restore/status CLI (stdlib only, must stay byte-compatible)
 - `tests/` unit tests (`run_unit_tests.sh`), simulator (`sim/`), end-to-end (`e2e/run_e2e.py`)
 - `examples/` generic, invented example configs; `docs/` documentation (German guide in `docs/de/`)
 
@@ -28,15 +28,15 @@ no broker, no cloud). Without `key` a node runs stand-alone (no network port).
   `build_callback_automations`).
 
 ## Conventions
-- Persistence and crypto labels keep the old name on purpose: `fingerprint_sync_meta`,
-  `fingerprint_sync_expiry` (preference keys), `fpsync-v1`, `fpsync-backup-v1` (HKDF salts).
-  Changing them loses stored versions/expiry dates or breaks existing backups.
+- Persistence and crypto labels must stay stable: `fingerprint_grow_plus_meta`,
+  `fingerprint_grow_plus_expiry` (preference keys), `growplus-v1`, `growplus-backup-v1` (HKDF salts),
+  magic `FGP`. Changing them loses stored versions/expiry dates or breaks existing backups.
 - Arduino core macros (`word(...)`, `bit`, `lowByte`, `highByte`, `constrain`, `sq`, `round`, …)
   must never be used as identifiers: a lambda named `word` silently broke ReadSysPara parsing on
   Arduino builds only.
 - C++: ESPHome style (`this->`, trailing `_` for protected members), English comments.
 - Every change: `tests/run_unit_tests.sh` and `python3 tests/e2e/run_e2e.py` must pass.
-- Protocol changes: bump `PROTOCOL_VERSION`, update `docs/protocol.md` and `tools/fpsync.py`.
+- Protocol changes: bump `PROTOCOL_VERSION`, update `docs/protocol.md` and `tools/growplus.py`.
 
 ## Privacy rules (public repository)
 - Never commit real node configurations, device names, pins, IP addresses, entity IDs,

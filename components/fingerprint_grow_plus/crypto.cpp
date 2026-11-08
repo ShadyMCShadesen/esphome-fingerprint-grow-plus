@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#ifdef FPSYNC_HOST_TEST
+#ifdef GROWPLUS_HOST_TEST
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
@@ -85,7 +85,7 @@ void chacha20_xor(const uint8_t key[KEY_SIZE], const uint8_t nonce[NONCE_SIZE], 
 
 void hmac_sha256(const uint8_t *key, size_t key_len, const Segment *segments, size_t segment_count,
                  uint8_t out[HMAC_SIZE]) {
-#ifdef FPSYNC_HOST_TEST
+#ifdef GROWPLUS_HOST_TEST
   HMAC_CTX *ctx = HMAC_CTX_new();
   HMAC_Init_ex(ctx, key, (int) key_len, EVP_sha256(), nullptr);
   for (size_t i = 0; i < segment_count; i++)
@@ -127,7 +127,7 @@ void hkdf_sha256(const uint8_t *salt, size_t salt_len, const uint8_t *ikm, size_
 }
 
 void sha256(const uint8_t *data, size_t len, uint8_t out[32]) {
-#ifdef FPSYNC_HOST_TEST
+#ifdef GROWPLUS_HOST_TEST
   SHA256(data, len, out);
 #else
   ::esphome::sha256::SHA256 hash;
@@ -152,7 +152,7 @@ void wipe(void *data, size_t len) {
 }
 
 bool random(uint8_t *data, size_t len) {
-#ifdef FPSYNC_HOST_TEST
+#ifdef GROWPLUS_HOST_TEST
   return RAND_bytes(data, (int) len) == 1;
 #else
   return ::esphome::random_bytes(data, len);

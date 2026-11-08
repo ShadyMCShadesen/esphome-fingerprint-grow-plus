@@ -4,7 +4,7 @@
 
 | test | command | covers |
 |---|---|---|
-| crypto unit tests | `tests/run_unit_tests.sh` | ChaCha20 vs OpenSSL, HKDF vs RFC 5869, handshake, tamper/replay/wrong key/self connection, byte-exact interop with `tools/fpsync.py` |
+| crypto unit tests | `tests/run_unit_tests.sh` | ChaCha20 vs OpenSSL, HKDF vs RFC 5869, handshake, tamper/replay/wrong key/self connection, byte-exact interop with `tools/growplus.py` |
 | end-to-end | `python3 tests/e2e/run_e2e.py` | 6 real firmware builds (ESPHome host platform) + simulated R503 sensors, see below |
 | config + compile | GitHub Actions | `esphome config` and `esphome compile` for ESP32 Arduino, ESP32 ESP-IDF, ESP8266 |
 

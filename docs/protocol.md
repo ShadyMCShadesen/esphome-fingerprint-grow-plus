@@ -1,4 +1,4 @@
-# Sync protocol (version 2)
+# Sync protocol (version 3)
 
 All integers are big endian. Transport: one TCP connection per session, default port 18530.
 
@@ -9,9 +9,9 @@ Every record: `u16 length | body` (length ≤ 2560).
 ### Handshake (plaintext bodies)
 
 ```
-C → S  C_HELLO  "FPS" 0x02 | 0x01 | client_id u32 | nonce_c[16]                  (25 bytes)
-S → C  S_HELLO  "FPS" 0x02 | 0x02 | server_id u32 | nonce_s[16] | proof_s[32]    (57 bytes)
-C → S  C_AUTH   "FPS" 0x02 | 0x03 | proof_c[32]                                   (37 bytes)
+C → S  C_HELLO  "FGP" 0x03 | 0x01 | client_id u32 | nonce_c[16]                  (25 bytes)
+S → C  S_HELLO  "FGP" 0x03 | 0x02 | server_id u32 | nonce_s[16] | proof_s[32]    (57 bytes)
+C → S  C_AUTH   "FGP" 0x03 | 0x03 | proof_c[32]                                   (37 bytes)
 ```
 
 The fourth magic byte is the protocol version; nodes with different versions refuse each other
@@ -19,7 +19,7 @@ The fourth magic byte is the protocol version; nodes with different versions ref
 
 - `node_id`: FNV-1 hash of the ESPHome node name. A node refuses a connection from or to its own ID.
 - Key schedule:
-  `keys = HKDF-SHA256(salt = "fpsync-v1", ikm = PSK, info = nonce_c | nonce_s | client_id | server_id, L = 160)`
+  `keys = HKDF-SHA256(salt = "growplus-v1", ikm = PSK, info = nonce_c | nonce_s | client_id | server_id, L = 160)`
   This yields `k_auth | k_enc_c2s | k_mac_c2s | k_enc_s2c | k_mac_s2c` (32 bytes each).
 - `proof_s = HMAC-SHA256(k_auth, "server" | C_HELLO | S_HELLO[0..25])`
 - `proof_c = HMAC-SHA256(k_auth, "client" | C_HELLO | S_HELLO)`
@@ -55,7 +55,8 @@ tampered record aborts the session.
 - `expires` = unix time after which a guest finger is deleted, 0 = never. It belongs to the slot
   version: a node adopting a version adopts its expiry.
 
-Version history: 1 = initial; 2 = `expires` added to MANIFEST, TEMPLATE and RESTORE.
+Version history: 1 = initial; 2 = `expires` added to MANIFEST, TEMPLATE and RESTORE;
+3 = magic `FGP` and HKDF salt `growplus-v1` (rename to `fingerprint_grow_plus`), messages unchanged.
 
 ### Session flow
 
@@ -72,6 +73,6 @@ Version history: 1 = initial; 2 = `expires` added to MANIFEST, TEMPLATE and REST
 Versions are 14 bit (max 16383). Every enrollment, deletion and conflict resolution in the
 cluster consumes one version. If the limit is ever reached:
 
-1. Back up one node with `tools/fpsync.py backup`.
+1. Back up one node with `tools/growplus.py backup`.
 2. Erase the metadata on all nodes (flash with `metadata_storage` switched or wipe preferences).
 3. Restore.

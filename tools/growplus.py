@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fpsync - backup, restore and inspection tool for fingerprint_grow_plus nodes.
+"""growplus - backup, restore and inspection tool for fingerprint_grow_plus nodes.
 
 Standard library only. Speaks the same authenticated, encrypted protocol as the nodes
 (see docs/protocol.md) and therefore needs the shared key.
@@ -11,7 +11,7 @@ Commands
   restore --host H --in FILE [--slots ..]  upload templates (node must run allow_restore first)
   inspect --in FILE                        list the content of a backup file
 
-The key is read from --key, from --key-file or from the environment variable FPSYNC_KEY.
+The key is read from --key, from --key-file or from the environment variable GROWPLUS_KEY.
 Backup files are encrypted and authenticated with a key derived from the shared key.
 Keep them out of any repository: they contain biometric templates.
 """
@@ -28,7 +28,7 @@ import sys
 import time
 
 DEFAULT_PORT = 18530
-MAGIC = b"FPS\x02"  # last byte = protocol version
+MAGIC = b"FGP\x03"  # last byte = protocol version
 TAG_SIZE = 16
 MAX_RECORD_BODY = 2560
 MSG_MANIFEST, MSG_TEMPLATE_REQ, MSG_TEMPLATE, MSG_TEMPLATE_NAK, MSG_DONE, MSG_RESTORE, MSG_RESTORE_ACK = range(1, 8)
@@ -126,7 +126,7 @@ class Channel:
         server_id = struct.unpack(">I", s_hello[5:9])[0]
         nonce_s = s_hello[9:25]
         info = self.nonce_c + nonce_s + struct.pack(">II", self.own_id, server_id)
-        keys = hkdf(b"fpsync-v1", self.psk, info, 160)
+        keys = hkdf(b"growplus-v1", self.psk, info, 160)
         self.k_auth = keys[0:32]
         self.enc_tx, self.mac_tx = keys[32:64], keys[64:96]
         self.enc_rx, self.mac_rx = keys[96:128], keys[128:160]
@@ -161,12 +161,12 @@ class Channel:
 
 # --------------------------------------------------------------------------- session helpers
 def load_key(args) -> bytes:
-    value = args.key or os.environ.get("FPSYNC_KEY")
+    value = args.key or os.environ.get("GROWPLUS_KEY")
     if args.key_file:
         with open(args.key_file, encoding="utf-8") as f:
             value = f.read().strip()
     if not value:
-        sys.exit("No key given (use --key, --key-file or FPSYNC_KEY)")
+        sys.exit("No key given (use --key, --key-file or GROWPLUS_KEY)")
     key = base64.b64decode(value)
     if len(key) != 32:
         sys.exit("The key must be base64 of exactly 32 bytes")
@@ -227,11 +227,11 @@ def parse_slots(text: str | None):
 
 
 # --------------------------------------------------------------------------- backup file
-FILE_MAGIC = b"FPSB\x01"
+FILE_MAGIC = b"FGPB\x01"
 
 
 def file_keys(key: bytes, salt: bytes):
-    k = hkdf(b"fpsync-backup-v1", key, salt, 64)
+    k = hkdf(b"growplus-backup-v1", key, salt, 64)
     return k[:32], k[32:]
 
 
@@ -250,7 +250,7 @@ def read_backup(path: str, key: bytes) -> dict:
     with open(path, "rb") as f:
         raw = f.read()
     if not raw.startswith(FILE_MAGIC) or len(raw) < len(FILE_MAGIC) + 16 + 32:
-        sys.exit("Not a fpsync backup file")
+        sys.exit("Not a growplus backup file")
     salt = raw[5:21]
     ct, tag = raw[21:-32], raw[-32:]
     enc, mac = file_keys(key, salt)

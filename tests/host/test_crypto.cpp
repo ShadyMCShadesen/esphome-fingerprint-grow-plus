@@ -8,7 +8,7 @@
 //  3. A full handshake + messages between a client and a server SecureChannel.
 //  4. Tampering, replay and wrong keys are rejected.
 //  5. Prints a deterministic transcript (fixed nonces) that tests/test_interop.py
-//     recomputes with the Python implementation in tools/fpsync.py.
+//     recomputes with the Python implementation in tools/growplus.py.
 
 #include "crypto.h"
 #include "secure_channel.h"

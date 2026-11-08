@@ -5,7 +5,7 @@
 // - ChaCha20 (RFC 8439) is implemented here because ESPHome offers no cipher that
 //   is available on ESP32 (Arduino and ESP-IDF) as well as ESP8266.
 // - HMAC-SHA256 is delegated to ESPHome's hmac_sha256 component (mbedTLS/PSA on
-//   ESP32, BearSSL on ESP8266). Host unit tests define FPSYNC_HOST_TEST and use
+//   ESP32, BearSSL on ESP8266). Host unit tests define GROWPLUS_HOST_TEST and use
 //   OpenSSL instead.
 
 #include <cstddef>
