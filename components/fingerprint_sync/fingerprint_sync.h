@@ -93,6 +93,7 @@ struct Session {
   uint8_t jobs_pending{0};
   uint8_t serve_pending{0};
   bool manifest_received{false};
+  size_t manifest_entries{0};
   bool done_sent{false};
   bool done_received{false};
   uint16_t pulled{0};
@@ -320,6 +321,9 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   // rounds
   bool round_active_{false};
   bool round_refreshing_{false};
+  uint32_t round_started_ms_{0};
+  uint32_t finger_since_ms_{0};
+  bool finger_stuck_logged_{false};
   bool round_requested_{false};
   uint32_t round_due_ms_{0};
   size_t round_peer_idx_{0};

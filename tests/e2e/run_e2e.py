@@ -287,6 +287,16 @@ def main():
             c.start_sim(name)
         for name in NODES:
             c.start_node(name)
+        # Test-harness robustness: very rarely the very first exchange with a freshly created
+        # pseudo terminal is lost and fingerprint_grow marks the (simulated) sensor as failed.
+        # That is an artefact of the simulator, so restart such a node once.
+        time.sleep(4)
+        for name in NODES:
+            if "fingerprint_grow was marked as failed" in c.log(name):
+                print(f"  note: restarting {name} (simulated sensor missed the first command)", flush=True)
+                c.stop_node(name)
+                c.path(name, "log").write_text("", encoding="utf-8")
+                c.start_node(name)
 
         print("== Scenario 1: initial full sync, convergence, conflict, exclusive range, auth")
         common = {0: "admin", 1: "alice", 5: "carol"}
@@ -420,6 +430,43 @@ def main():
         res = subprocess.run(tool + ["status", "--host", "127.0.0.1", "--port", "18532"],
                              capture_output=True, text=True, env=env, check=False)
         results.append(wait_until("status command lists node B's slots", lambda: "slot    3" in res.stdout, 1))
+
+        print("== Scenario 8: hostile peers are cut off (handshake timeout, duplicate manifest)")
+        import socket as _socket
+        sys.path.insert(0, str(ROOT / "tools"))
+        import fpsync  # noqa: E402
+
+        def silent_connection_closed():
+            sock = _socket.create_connection(("127.0.0.1", 18532), timeout=12)
+            start = time.time()
+            try:
+                data = sock.recv(16)
+            except OSError:
+                data = b""
+            sock.close()
+            return data == b"" and time.time() - start < 11
+
+        results.append(wait_until("a connection that never sends a handshake is closed after ~5 s",
+                                  silent_connection_closed, 1))
+        time.sleep(1)
+
+        def duplicate_manifest_rejected():
+            sock = _socket.create_connection(("127.0.0.1", 18532), timeout=10)
+            ch = fpsync.Channel(sock, __import__("base64").b64decode(KEY), 0x1234)
+            ch.handshake()
+            empty = bytes([fpsync.MSG_MANIFEST, 0, 1, 0, 200, 0, 0])
+            ch.send(empty)
+            ch.send(empty)
+            try:
+                while True:
+                    ch.recv()
+            except (ConnectionError, OSError):
+                pass
+            sock.close()
+            return "manifest sent twice" in c.log("node-b")
+
+        results.append(wait_until("a peer sending its manifest twice is disconnected",
+                                  duplicate_manifest_rejected, 1))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))

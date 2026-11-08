@@ -23,6 +23,15 @@ versioning: [Semantic Versioning](https://semver.org/).
 - New option `fingerprint_capacity_sensor`: the synced slot range follows fingerprint_grow's
   capacity; a capacity below the number of stored templates is rejected.
 
+### Security / robustness
+- Unauthenticated connections are closed after 5 s without a completed handshake.
+- Per-session limits: one manifest of at most capacity entries, 16 KB send buffer, one
+  outstanding restore; the job queue is capped and idempotent jobs are deduplicated, also
+  across simultaneous sessions with the same peer.
+- A stuck finger sensor (> 60 s) no longer blocks the sync forever; a round waiting more than
+  5 min for a busy sensor is given up and retried later.
+- The receive buffer limit covers one maximum record plus one read chunk.
+
 ### Fixed
 - ESP32 Arduino builds parsed ReadSysPara wrongly (capacity 2): a helper named `word` collided
   with the Arduino `word(...)` macro.

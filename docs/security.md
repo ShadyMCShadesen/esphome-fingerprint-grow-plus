@@ -23,6 +23,8 @@ Fingerprint templates are biometric data. They cannot be changed like a password
 | template leak via logs | templates are never logged at any level (only slot numbers); buffers are wiped after use |
 | accidental mass deletion | `delete_all` needs the configured code and `confirm_cluster_wide: true`; local deletions via `fingerprint_grow` are *not* propagated |
 | uncontrolled restore | `RESTORE` is accepted only within an `allow_restore` window opened on the node itself |
+| resource exhaustion | handshake must finish within 5 s; receive buffer ≤ one record; send buffer ≤ 16 KB per session; one manifest per session, ≤ capacity entries; ≤ 4 outstanding template requests and 1 outstanding restore; job queue ≤ 300 with idempotent jobs deduplicated; at most one template (≈1.5 KB) per session in RAM |
+| stuck sensor | a finger sensor reporting a finger for > 60 s is treated as stuck; a sync round waiting > 5 min for a busy sensor is given up |
 
 ### Why this construction
 

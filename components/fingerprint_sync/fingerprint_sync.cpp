@@ -18,12 +18,23 @@ static const char *const TAG = "fingerprint_sync";
 static constexpr uint32_t ACTIVITY_HOLDOFF_MS = 1500;
 static constexpr uint32_t CONNECT_TIMEOUT_MS = 12000;
 static constexpr uint32_t SESSION_IDLE_TIMEOUT_MS = 30000;
+/// An unauthenticated connection must complete the handshake within this time; it occupies the
+/// only inbound slot meanwhile.
+static constexpr uint32_t HANDSHAKE_TIMEOUT_MS = 5000;
+/// A peer that stops reading our answers must not make the send buffer grow without bound.
+static constexpr size_t SESSION_TX_LIMIT = 16 * 1024;
 static constexpr uint32_t SESSION_MAX_MS = 10 * 60 * 1000;
 static constexpr uint32_t META_SAVE_DEBOUNCE_MS = 2000;
 static constexpr uint32_t PUSH_DELAY_MS = 2000;
 static constexpr uint32_t SENSOR_RETRY_MS = 30000;
 static constexpr uint16_t MAX_CAPACITY = 1024;
 static constexpr size_t MAX_QUEUED_JOBS = 64;
+/// Hard limit for the job queue (a job without template data is about 48 bytes).
+static constexpr size_t JOB_QUEUE_LIMIT = 300;
+/// A finger sensor that reports "finger present" longer than this is considered stuck.
+static constexpr uint32_t FINGER_STUCK_MS = 60000;
+/// A sync round that cannot even refresh the index within this time is given up.
+static constexpr uint32_t ROUND_REFRESH_TIMEOUT_MS = 5 * 60 * 1000;
 
 static inline bool elapsed(uint32_t now, uint32_t since, uint32_t duration) { return now - since >= duration; }
 
@@ -83,8 +94,8 @@ void FingerprintSyncComponent::setup() {
       ESP_LOGI(TAG, "Slot %u enrolled locally; it is not synced (outside the managed slots)", slot);
       return;
     }
+    this->pending_hash_++;  // counted before queueing: queue_job_ undoes it for a duplicate
     this->queue_simple_job_(JobType::HASH, slot, JOB_FLAG_ENROLLED | JOB_FLAG_PROPAGATE);
-    this->pending_hash_++;
   });
   this->grow_->add_on_enrollment_failed_callback([this](uint16_t) {
     this->enrolling_ = false;
@@ -212,8 +223,21 @@ bool FingerprintSyncComponent::sensor_available_() {
   }
   if (this->enrolling_)
     return false;
-  if (this->finger_sensor_ != nullptr && this->finger_sensor_->state)
-    return false;
+  if (this->finger_sensor_ != nullptr && this->finger_sensor_->state) {
+    const uint32_t now = millis();
+    if (this->finger_since_ms_ == 0)
+      this->finger_since_ms_ = now;
+    if (!elapsed(now, this->finger_since_ms_, FINGER_STUCK_MS))
+      return false;
+    if (!this->finger_stuck_logged_) {
+      ESP_LOGW(TAG, "Finger sensor reports a finger for more than %" PRIu32 " s; treating it as stuck",
+               FINGER_STUCK_MS / 1000);
+      this->finger_stuck_logged_ = true;
+    }
+  } else {
+    this->finger_since_ms_ = 0;
+    this->finger_stuck_logged_ = false;
+  }
   if (!elapsed(millis(), this->last_activity_ms_, ACTIVITY_HOLDOFF_MS))
     return false;
   return true;
@@ -223,7 +247,33 @@ bool FingerprintSyncComponent::sensor_available_() {
 // Job queue
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintSyncComponent::queue_job_(Job &&job) { this->jobs_.push_back(std::move(job)); }
+void FingerprintSyncComponent::queue_job_(Job &&job) {
+  // Jobs without data for the same slot are idempotent; never queue them twice. This keeps the
+  // queue bounded when the sensor is blocked (enrollment, finger on the sensor) for a long time.
+  if (job.type == JobType::DELETE || job.type == JobType::HASH) {
+    for (const auto &queued : this->jobs_) {
+      if (queued.type == job.type && queued.slot == job.slot && queued.flags == job.flags &&
+          queued.meta == job.meta) {
+        if (job.type == JobType::HASH && this->pending_hash_ > 0)
+          this->pending_hash_--;  // the caller counted this duplicate
+        return;
+      }
+    }
+  }
+  if (this->jobs_.size() >= JOB_QUEUE_LIMIT) {
+    ESP_LOGE(TAG, "Job queue full (%u), dropping a job; the next round retries", (unsigned) this->jobs_.size());
+    this->error_count_++;
+    if (job.type == JobType::HASH && this->pending_hash_ > 0)
+      this->pending_hash_--;
+    Session *s = this->session_by_gen_(job.session);
+    if (s != nullptr && (job.type == JobType::WRITE) && s->jobs_pending > 0)
+      s->jobs_pending--;
+    if (s != nullptr && job.type == JobType::SERVE && s->serve_pending > 0)
+      s->serve_pending--;
+    return;
+  }
+  this->jobs_.push_back(std::move(job));
+}
 
 void FingerprintSyncComponent::queue_simple_job_(JobType type, uint16_t slot, uint8_t flags) {
   Job job;
@@ -400,8 +450,8 @@ void FingerprintSyncComponent::job_refresh_index_() {
         continue;
       }
       if (!this->hash_known_[slot]) {
+        this->pending_hash_++;  // counted before queueing: queue_job_ undoes it for a duplicate
         this->queue_simple_job_(JobType::HASH, slot);
-        this->pending_hash_++;
       }
     } else if (meta_present(m)) {
       ESP_LOGI(TAG, "Slot %u is missing on this sensor; it will be restored from peers", slot);
@@ -987,6 +1037,12 @@ void FingerprintSyncComponent::handle_template_(Session &s, uint16_t slot, uint1
   job.session = s.gen;
   memcpy(job.hash.data(), hash, HASH_SIZE);
   job.data.assign(data, data + len);
+  for (const auto &queued : this->jobs_) {
+    if (queued.type == JobType::WRITE && queued.slot == slot && queued.hash == job.hash) {
+      ESP_LOGD(TAG, "Slot %u: the same template is already queued for writing", slot);
+      return;  // e.g. two simultaneous sessions with the same peer delivering the same template
+    }
+  }
   const uint16_t local = this->meta_[slot];
   if (!meta_present(local)) {
     job.type = JobType::WRITE;
@@ -1030,6 +1086,7 @@ static void reset_session(Session &s) {
   s.jobs_pending = 0;
   s.serve_pending = 0;
   s.manifest_received = false;
+  s.manifest_entries = 0;
   s.done_sent = false;
   s.done_received = false;
   s.pulled = 0;
@@ -1126,6 +1183,15 @@ void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uin
       uint16_t capacity, count;
       if (!r.u8(page) || !r.u8(flags) || !r.u16(capacity) || !r.u16(count))
         break;
+      if (s.manifest_received) {
+        this->end_session_(s, false, "manifest sent twice");
+        return;
+      }
+      s.manifest_entries += count;
+      if (s.manifest_entries > (size_t) this->capacity_ + MANIFEST_ENTRIES_PER_PAGE) {
+        this->end_session_(s, false, "manifest larger than the slot range");
+        return;
+      }
       for (uint16_t i = 0; i < count; i++) {
         uint16_t slot, meta;
         uint8_t hash[HASH_SIZE];
@@ -1199,6 +1265,10 @@ void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uin
         this->send_simple_(s, MSG_RESTORE_ACK, slot, 2, true);
         break;
       }
+      if (s.jobs_pending >= 1) {
+        this->end_session_(s, false, "restore sent before the previous one was acknowledged");
+        return;
+      }
       Job job;
       job.type = JobType::WRITE;
       job.slot = slot;
@@ -1255,6 +1325,7 @@ void FingerprintSyncComponent::service_session_(Session &s) {
     if (s.stream->connected()) {
       s.phase = Session::Phase::HANDSHAKE;
       s.last_rx_ms = now;
+      s.started_ms = now;  // handshake and session time limits count from the connection
       s.channel.begin_client(this->psk_.data(), this->node_id_, s.tx);
     } else if (elapsed(now, s.started_ms, CONNECT_TIMEOUT_MS)) {
       this->end_session_(s, false, "not reachable");
@@ -1328,6 +1399,14 @@ void FingerprintSyncComponent::service_session_(Session &s) {
     s.stream->flush();
   }
   bool flushed = s.tx.empty() && s.stream->flush();
+  if (s.tx.size() > SESSION_TX_LIMIT) {
+    this->end_session_(s, false, "peer does not read its data");
+    return;
+  }
+  if (s.phase == Session::Phase::HANDSHAKE && elapsed(now, s.started_ms, HANDSHAKE_TIMEOUT_MS)) {
+    this->end_session_(s, false, "handshake timeout");
+    return;
+  }
 
   if (s.is_client && s.done_sent && s.done_received && s.serve_pending == 0 && s.jobs_pending == 0 && flushed) {
     this->end_session_(s, true, "");
@@ -1354,6 +1433,7 @@ void FingerprintSyncComponent::run_round_() {
     this->round_requested_ = false;
     this->round_active_ = true;
     this->round_refreshing_ = true;
+    this->round_started_ms_ = now;
     this->round_peer_idx_ = 0;
     this->round_reachable_ = 0;
     this->round_failures_ = 0;
@@ -1372,8 +1452,23 @@ void FingerprintSyncComponent::run_round_() {
     return;
   }
   if (this->round_refreshing_) {
-    if (!this->ready_)
+    if (!this->ready_) {
+      if (elapsed(now, this->round_started_ms_, ROUND_REFRESH_TIMEOUT_MS)) {
+        // The sensor stayed busy (e.g. an abandoned enrollment). Give the round up instead of
+        // waiting forever; the queued index refresh still runs once the sensor is free.
+        this->round_active_ = false;
+        this->round_refreshing_ = false;
+        ESP_LOGW(TAG, "Sync round given up: the sensor was busy for %" PRIu32 " s",
+                 ROUND_REFRESH_TIMEOUT_MS / 1000);
+        this->error_count_++;
+        this->sync_failed_cb_.call(std::string("sensor busy"));
+        this->set_status_("sensor busy");
+        this->publish_diagnostics_();
+        if (!this->round_requested_)
+          this->request_round_(this->sync_interval_ms_);
+      }
       return;
+    }
     this->round_refreshing_ = false;
   }
   if (this->outbound_.phase != Session::Phase::IDLE)

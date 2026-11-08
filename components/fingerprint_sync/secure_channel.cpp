@@ -91,7 +91,8 @@ void SecureChannel::begin_server(const uint8_t *psk, uint32_t own_id) {
 }
 
 bool SecureChannel::feed(const uint8_t *data, size_t len) {
-  if (this->rx_.size() + len > MAX_RECORD_BODY + 2 + 64) {
+  // One complete record plus one read chunk of the next (callers read in chunks of <= 512 bytes).
+  if (this->rx_.size() + len > MAX_RECORD_BODY + 2 + 512) {
     // A peer that keeps sending without completing records is broken or hostile.
     this->fail_("receive buffer overflow");
     return false;
