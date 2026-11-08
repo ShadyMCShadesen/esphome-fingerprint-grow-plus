@@ -6,9 +6,9 @@
 
 #include <cstring>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
-static const char *const TAG = "fingerprint_sync.grow";
+static const char *const TAG = "fingerprint_grow_plus.grow";
 
 static constexpr uint8_t PID_COMMAND = 0x01;
 static constexpr uint8_t PID_DATA = 0x02;
@@ -360,4 +360,4 @@ uint8_t GrowLink::read_template(uint16_t slot, std::vector<uint8_t> &out, uint8_
   return this->up_char(buffer, out);
 }
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

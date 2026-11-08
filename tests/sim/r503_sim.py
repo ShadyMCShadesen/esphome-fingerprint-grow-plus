@@ -2,7 +2,7 @@
 """Minimal GROW R503 simulator for host-platform tests.
 
 Creates a pseudo terminal, links its slave side to --link and answers the R503 packet
-protocol (subset used by ESPHome's fingerprint_grow and by fingerprint_sync).
+protocol (subset used by ESPHome's fingerprint_grow and by fingerprint_grow_plus).
 
 Templates are synthetic, never real biometric data: 768 bytes whose first 16 bytes are a
 "finger identity" (used by Match/Search), the rest is per-enrollment noise. That models

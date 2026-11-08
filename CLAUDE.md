@@ -1,15 +1,17 @@
 # CLAUDE.md – project context
 
-ESPHome external component `fingerprint_sync`: synchronises GROW (R503/R30x) fingerprint
-templates directly between ESPHome nodes (no Home Assistant, no broker, no cloud).
+ESPHome external component `fingerprint_grow_plus` (formerly `fingerprint_sync`): extensions for
+`fingerprint_grow` (GROW R503/R30x): admin fingers with gestures, guest fingers with expiry,
+protected slots, and optional template sync directly between ESPHome nodes (no Home Assistant,
+no broker, no cloud). Without `key` a node runs stand-alone (no network port).
 
 ## Layout
-- `components/fingerprint_sync/` – the component
+- `components/fingerprint_grow_plus/` – the component
   - `grow_link.*` R503 template commands on the shared UART (one complete transaction per call)
   - `secure_channel.*` handshake + ChaCha20/HMAC record layer; `crypto.*` primitives
   - `transport.h`, `tcp_transport.*` transport abstraction (TCP via ESPHome socket helpers)
   - `protocol.h` messages and slot metadata encoding; `meta_storage.*` persistence
-  - `fingerprint_sync.*` job queue, sync decisions, sessions, rounds
+  - `fingerprint_grow_plus.*` job queue, sync decisions, sessions, rounds
   - `__init__.py`, `sensor.py`, `text_sensor.py`, `binary_sensor.py` codegen
 - `tools/fpsync.py` backup/restore/status CLI (stdlib only, must stay byte-compatible)
 - `tests/` unit tests (`run_unit_tests.sh`), simulator (`sim/`), end-to-end (`e2e/run_e2e.py`)
@@ -26,6 +28,9 @@ templates directly between ESPHome nodes (no Home Assistant, no broker, no cloud
   `build_callback_automations`).
 
 ## Conventions
+- Persistence and crypto labels keep the old name on purpose: `fingerprint_sync_meta`,
+  `fingerprint_sync_expiry` (preference keys), `fpsync-v1`, `fpsync-backup-v1` (HKDF salts).
+  Changing them loses stored versions/expiry dates or breaks existing backups.
 - Arduino core macros (`word(...)`, `bit`, `lowByte`, `highByte`, `constrain`, `sq`, `round`, …)
   must never be used as identifiers: a lambda named `word` silently broke ReadSysPara parsing on
   Arduino builds only.

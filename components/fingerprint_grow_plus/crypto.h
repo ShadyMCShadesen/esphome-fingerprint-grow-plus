@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace esphome::fingerprint_sync::crypto {
+namespace esphome::fingerprint_grow_plus::crypto {
 
 static constexpr size_t KEY_SIZE = 32;
 static constexpr size_t NONCE_SIZE = 12;
@@ -47,4 +47,4 @@ void wipe(void *data, size_t len);
 /// Cryptographically secure random bytes from the platform RNG.
 bool random(uint8_t *data, size_t len);
 
-}  // namespace esphome::fingerprint_sync::crypto
+}  // namespace esphome::fingerprint_grow_plus::crypto

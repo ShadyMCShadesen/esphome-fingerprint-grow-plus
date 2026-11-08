@@ -1,4 +1,4 @@
-#include "fingerprint_sync.h"
+#include "fingerprint_grow_plus.h"
 #include "crypto.h"
 
 #include "esphome/core/application.h"
@@ -10,9 +10,9 @@
 #include <cinttypes>
 #include <cstring>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
-static const char *const TAG = "fingerprint_sync";
+static const char *const TAG = "fingerprint_grow_plus";
 
 /// Matching has priority: no sensor job within this time after any scan activity.
 static constexpr uint32_t ACTIVITY_HOLDOFF_MS = 1500;
@@ -42,7 +42,7 @@ static inline bool elapsed(uint32_t now, uint32_t since, uint32_t duration) { re
 // Setup / config
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintSyncComponent::setup() {
+void FingerprintGrowPlusComponent::setup() {
   this->boot_ms_ = millis();
   this->link_.set_uart(this);
   this->node_id_ = fnv1_hash(App.get_name());
@@ -53,7 +53,8 @@ void FingerprintSyncComponent::setup() {
   } else {
     this->storage_ = std::make_unique<PreferenceStorage>(fnv1_hash("fingerprint_sync_meta") ^ this->node_id_);
   }
-  this->transport_.setup(TAG);
+  if (this->network_)
+    this->transport_.setup(TAG);
 
   auto activity = [this]() { this->last_activity_ms_ = millis(); };
   this->grow_->add_on_finger_scan_start_callback(activity);
@@ -91,10 +92,14 @@ void FingerprintSyncComponent::setup() {
   this->publish_diagnostics_();
 }
 
-void FingerprintSyncComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "Fingerprint Sync:");
+void FingerprintGrowPlusComponent::dump_config() {
+  ESP_LOGCONFIG(TAG, "Fingerprint Grow Plus:");
   ESP_LOGCONFIG(TAG, "  Node: %s (id %08" PRIX32 ")", App.get_name().c_str(), this->node_id_);
-  this->transport_.dump_config();
+  if (this->network_) {
+    this->transport_.dump_config();
+  } else {
+    ESP_LOGCONFIG(TAG, "  Network sync: off (no key configured), local features only");
+  }
   for (const auto &peer : this->peers_) {
     ESP_LOGCONFIG(TAG, "  Peer: %s:%u%s", peer.host, peer.port, this->is_self_(peer) ? " (this node, skipped)" : "");
   }
@@ -126,7 +131,7 @@ void FingerprintSyncComponent::dump_config() {
 // Helpers
 // ---------------------------------------------------------------------------------------------
 
-bool FingerprintSyncComponent::managed_(uint16_t slot) const {
+bool FingerprintGrowPlusComponent::managed_(uint16_t slot) const {
   if (slot >= this->capacity_)
     return false;
   bool included = this->include_.empty();
@@ -145,7 +150,7 @@ bool FingerprintSyncComponent::managed_(uint16_t slot) const {
   return true;
 }
 
-uint16_t FingerprintSyncComponent::next_version_() {
+uint16_t FingerprintGrowPlusComponent::next_version_() {
   if (this->clock_ >= MAX_VERSION) {
     ESP_LOGE(TAG, "Version counter exhausted; see docs/protocol.md (version reset)");
     return MAX_VERSION;
@@ -153,20 +158,20 @@ uint16_t FingerprintSyncComponent::next_version_() {
   return ++this->clock_;
 }
 
-void FingerprintSyncComponent::mark_dirty_() {
+void FingerprintGrowPlusComponent::mark_dirty_() {
   if (!this->meta_dirty_)
     this->meta_dirty_ms_ = millis();
   this->meta_dirty_ = true;
 }
 
-void FingerprintSyncComponent::request_round_(uint32_t delay_ms) {
+void FingerprintGrowPlusComponent::request_round_(uint32_t delay_ms) {
   uint32_t due = millis() + delay_ms;
   if (!this->round_requested_ || (int32_t) (due - this->round_due_ms_) < 0)
     this->round_due_ms_ = due;
   this->round_requested_ = true;
 }
 
-void FingerprintSyncComponent::set_status_(const char *status) {
+void FingerprintGrowPlusComponent::set_status_(const char *status) {
   if (strcmp(this->status_, status) == 0)
     return;
   this->status_ = status;
@@ -181,14 +186,14 @@ void FingerprintSyncComponent::set_status_(const char *status) {
 #endif
 }
 
-uint16_t FingerprintSyncComponent::conflict_count() const {
+uint16_t FingerprintGrowPlusComponent::conflict_count() const {
   uint16_t n = 0;
   for (bool c : this->conflict_)
     n += c ? 1 : 0;
   return n;
 }
 
-void FingerprintSyncComponent::publish_diagnostics_() {
+void FingerprintGrowPlusComponent::publish_diagnostics_() {
 #ifdef USE_SENSOR
   if (this->error_count_sensor_ != nullptr)
     this->error_count_sensor_->publish_state(this->error_count_);
@@ -197,7 +202,7 @@ void FingerprintSyncComponent::publish_diagnostics_() {
 #endif
 }
 
-bool FingerprintSyncComponent::is_self_(const Peer &peer) const {
+bool FingerprintGrowPlusComponent::is_self_(const Peer &peer) const {
   const std::string &name = App.get_name();
   std::string host = peer.host;
   std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -206,7 +211,7 @@ bool FingerprintSyncComponent::is_self_(const Peer &peer) const {
   return host == lname || host == lname + ".local";
 }
 
-bool FingerprintSyncComponent::sensor_available_() {
+bool FingerprintGrowPlusComponent::sensor_available_() {
   if (this->grow_->is_failed()) {
     if (!this->failed_sensor_) {
       ESP_LOGE(TAG, "fingerprint_grow reports a failed sensor; sync paused");
@@ -241,7 +246,7 @@ bool FingerprintSyncComponent::sensor_available_() {
 // Job queue
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintSyncComponent::queue_job_(Job &&job) {
+void FingerprintGrowPlusComponent::queue_job_(Job &&job) {
   // Jobs without data for the same slot are idempotent; never queue them twice. This keeps the
   // queue bounded when the sensor is blocked (enrollment, finger on the sensor) for a long time.
   if (job.type == JobType::DELETE || job.type == JobType::HASH) {
@@ -269,7 +274,7 @@ void FingerprintSyncComponent::queue_job_(Job &&job) {
   this->jobs_.push_back(std::move(job));
 }
 
-void FingerprintSyncComponent::queue_simple_job_(JobType type, uint16_t slot, uint8_t flags) {
+void FingerprintGrowPlusComponent::queue_simple_job_(JobType type, uint16_t slot, uint8_t flags) {
   Job job;
   job.type = type;
   job.slot = slot;
@@ -277,7 +282,7 @@ void FingerprintSyncComponent::queue_simple_job_(JobType type, uint16_t slot, ui
   this->queue_job_(std::move(job));
 }
 
-void FingerprintSyncComponent::run_next_job_() {
+void FingerprintGrowPlusComponent::run_next_job_() {
   if (this->jobs_.empty() || !this->sensor_available_())
     return;
   Job job = std::move(this->jobs_.front());
@@ -315,7 +320,7 @@ void FingerprintSyncComponent::run_next_job_() {
     crypto::wipe(job.data.data(), job.data.size());
 }
 
-void FingerprintSyncComponent::finish_indexing_if_done_() {
+void FingerprintGrowPlusComponent::finish_indexing_if_done_() {
   if (this->ready_ || !this->params_loaded_ || this->pending_hash_ != 0 || this->refresh_queued_)
     return;
   this->ready_ = true;
@@ -337,7 +342,7 @@ void FingerprintSyncComponent::finish_indexing_if_done_() {
 // Jobs (each one is a complete set of sensor transactions inside a single loop() call)
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintSyncComponent::job_refresh_index_() {
+void FingerprintGrowPlusComponent::job_refresh_index_() {
   if (!this->params_loaded_) {
     // Read the parameters twice and only accept identical, plausible answers: a module that
     // is still busy with an earlier transfer must never shrink the managed slot range.
@@ -460,7 +465,7 @@ void FingerprintSyncComponent::job_refresh_index_() {
   this->finish_indexing_if_done_();
 }
 
-void FingerprintSyncComponent::job_hash_(Job &job) {
+void FingerprintGrowPlusComponent::job_hash_(Job &job) {
   const uint16_t slot = job.slot;
   if (this->pending_hash_ > 0)
     this->pending_hash_--;
@@ -502,7 +507,7 @@ void FingerprintSyncComponent::job_hash_(Job &job) {
   this->finish_indexing_if_done_();
 }
 
-void FingerprintSyncComponent::job_serve_(Job &job) {
+void FingerprintGrowPlusComponent::job_serve_(Job &job) {
   Session *s = this->session_by_gen_(job.session);
   if (s != nullptr && s->serve_pending > 0)
     s->serve_pending--;
@@ -543,7 +548,7 @@ void FingerprintSyncComponent::job_serve_(Job &job) {
   s->served++;
 }
 
-bool FingerprintSyncComponent::store_verified_(uint8_t buffer, uint16_t slot, const std::vector<uint8_t> &data) {
+bool FingerprintGrowPlusComponent::store_verified_(uint8_t buffer, uint16_t slot, const std::vector<uint8_t> &data) {
   // Precondition: CharBuffer `buffer` holds `data`.
   uint8_t res = this->link_.store(buffer, slot);
   if (res != GROW_OK) {
@@ -570,7 +575,7 @@ bool FingerprintSyncComponent::store_verified_(uint8_t buffer, uint16_t slot, co
   return ok;
 }
 
-void FingerprintSyncComponent::apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires) {
+void FingerprintGrowPlusComponent::apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires) {
   this->meta_[slot] = meta;
   this->set_expiry_(slot, expires);
   memcpy(this->hash_[slot].data(), hash, HASH_SIZE);
@@ -585,7 +590,7 @@ void FingerprintSyncComponent::apply_stored_(uint16_t slot, uint16_t meta, const
   this->slot_updated_cb_.call(slot);
 }
 
-void FingerprintSyncComponent::job_write_(Job &job) {
+void FingerprintGrowPlusComponent::job_write_(Job &job) {
   Session *s = this->session_by_gen_(job.session);
   if (s != nullptr && s->jobs_pending > 0)
     s->jobs_pending--;
@@ -632,7 +637,7 @@ void FingerprintSyncComponent::job_write_(Job &job) {
     this->send_simple_(*s, MSG_RESTORE_ACK, slot, ok ? 0 : 1, true);
 }
 
-void FingerprintSyncComponent::flag_conflict_(uint16_t slot) {
+void FingerprintGrowPlusComponent::flag_conflict_(uint16_t slot) {
   if (this->conflict_[slot])
     return;
   this->conflict_[slot] = true;
@@ -640,12 +645,12 @@ void FingerprintSyncComponent::flag_conflict_(uint16_t slot) {
     return;  // still the same conflict as in the previous round
   this->conflict_reported_[slot] = true;
   ESP_LOGW(TAG, "CONFLICT in slot %u: a peer stores a different template in this slot. Nothing was "
-           "overwritten; use fingerprint_sync.resolve_conflict or resolve_all_conflicts.", slot);
+           "overwritten; use fingerprint_grow_plus.resolve_conflict or resolve_all_conflicts.", slot);
   this->conflict_cb_.call(slot);
   this->publish_diagnostics_();
 }
 
-void FingerprintSyncComponent::job_delete_(Job &job) {
+void FingerprintGrowPlusComponent::job_delete_(Job &job) {
   const uint16_t slot = job.slot;
   const bool remote = job.flags & JOB_FLAG_REMOTE;
   if (this->dry_run_ && remote) {
@@ -682,13 +687,13 @@ void FingerprintSyncComponent::job_delete_(Job &job) {
     this->request_round_(PUSH_DELAY_MS);
 }
 
-void FingerprintSyncComponent::job_count_() {
+void FingerprintGrowPlusComponent::job_count_() {
   uint16_t count = 0;
   if (this->link_.template_count(count) == GROW_OK && this->count_sensor_ != nullptr)
     this->count_sensor_->publish_state(count);
 }
 
-void FingerprintSyncComponent::self_test(uint16_t slot, uint16_t compare_slot) {
+void FingerprintGrowPlusComponent::self_test(uint16_t slot, uint16_t compare_slot) {
   ESP_LOGI(TAG, "Self test on slot %u queued (only sensor buffers are used, no slot is written)", slot);
   for (uint8_t variant = 1; variant <= 5; variant++) {
     if (variant == 5 && compare_slot == NO_SLOT)
@@ -702,7 +707,7 @@ void FingerprintSyncComponent::self_test(uint16_t slot, uint16_t compare_slot) {
   }
 }
 
-void FingerprintSyncComponent::claim_all_slots() {
+void FingerprintGrowPlusComponent::claim_all_slots() {
   if (!this->indexed_once_) {
     ESP_LOGW(TAG, "claim_all_slots refused: index not ready yet");
     return;
@@ -721,7 +726,7 @@ void FingerprintSyncComponent::claim_all_slots() {
   this->request_round_(PUSH_DELAY_MS);
 }
 
-void FingerprintSyncComponent::resolve_all_conflicts(bool keep_local) {
+void FingerprintGrowPlusComponent::resolve_all_conflicts(bool keep_local) {
   if (!this->params_loaded_)
     return;
   uint16_t n = 0;
@@ -734,7 +739,7 @@ void FingerprintSyncComponent::resolve_all_conflicts(bool keep_local) {
   ESP_LOGI(TAG, "%u conflict(s) resolved (%s)", n, keep_local ? "this node's fingers win" : "peers' fingers win");
 }
 
-void FingerprintSyncComponent::job_self_test_(Job &job) {
+void FingerprintGrowPlusComponent::job_self_test_(Job &job) {
   const uint16_t slot = job.slot;
   const uint8_t variant = job.flags;
   auto report = [this, variant](const char *step, uint8_t res) {
@@ -793,7 +798,7 @@ void FingerprintSyncComponent::job_self_test_(Job &job) {
     crypto::wipe(back.data(), back.size());
 }
 
-void FingerprintSyncComponent::job_save_meta_() {
+void FingerprintGrowPlusComponent::job_save_meta_() {
   this->save_expiries_();
   if (!this->storage_->save(this->meta_)) {
     this->error_count_++;
@@ -807,18 +812,18 @@ void FingerprintSyncComponent::job_save_meta_() {
 // Public actions
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintSyncComponent::sync_now() {
+void FingerprintGrowPlusComponent::sync_now() {
   ESP_LOGI(TAG, "Manual sync requested");
   this->request_round_(0);
 }
 
-void FingerprintSyncComponent::delete_slot(uint16_t slot) {
+void FingerprintGrowPlusComponent::delete_slot(uint16_t slot) {
   if (!this->params_loaded_ || slot >= this->capacity_) {
     ESP_LOGW(TAG, "Cannot delete slot %u (sensor not indexed yet or slot out of range)", slot);
     return;
   }
   if (this->is_admin_slot(slot)) {
-    ESP_LOGW(TAG, "Slot %u is an admin finger and protected; use fingerprint_sync.delete_admin", slot);
+    ESP_LOGW(TAG, "Slot %u is an admin finger and protected; use fingerprint_grow_plus.delete_admin", slot);
     return;
   }
   Job job;
@@ -828,7 +833,7 @@ void FingerprintSyncComponent::delete_slot(uint16_t slot) {
   this->queue_job_(std::move(job));
 }
 
-void FingerprintSyncComponent::delete_all(const std::string &code) {
+void FingerprintGrowPlusComponent::delete_all(const std::string &code) {
   if (this->delete_all_code_ == nullptr || this->delete_all_code_[0] == '\0' || code != this->delete_all_code_) {
     ESP_LOGW(TAG, "delete_all refused: wrong or unconfigured code");
     return;
@@ -857,11 +862,11 @@ void FingerprintSyncComponent::delete_all(const std::string &code) {
   this->request_round_(PUSH_DELAY_MS + 1000u * queued);
 }
 
-int32_t FingerprintSyncComponent::next_free_slot() const {
+int32_t FingerprintGrowPlusComponent::next_free_slot() const {
   return this->next_free_in_(this->enroll_from_, this->enroll_to_, false);
 }
 
-void FingerprintSyncComponent::enroll_next_free(uint8_t num_scans) {
+void FingerprintGrowPlusComponent::enroll_next_free(uint8_t num_scans) {
   if (!this->indexed_once_) {
     ESP_LOGW(TAG, "Enrollment refused: index not ready yet");
     return;
@@ -880,7 +885,7 @@ void FingerprintSyncComponent::enroll_next_free(uint8_t num_scans) {
   this->grow_->enroll_fingerprint((uint16_t) slot, num_scans);
 }
 
-void FingerprintSyncComponent::resolve_conflict(uint16_t slot, bool keep_local) {
+void FingerprintGrowPlusComponent::resolve_conflict(uint16_t slot, bool keep_local) {
   if (!this->params_loaded_ || !this->managed_(slot)) {
     ESP_LOGW(TAG, "resolve_conflict: slot %u is not a managed slot", slot);
     return;
@@ -908,7 +913,11 @@ void FingerprintSyncComponent::resolve_conflict(uint16_t slot, bool keep_local) 
   this->publish_diagnostics_();
 }
 
-void FingerprintSyncComponent::allow_restore(uint32_t seconds) {
+void FingerprintGrowPlusComponent::allow_restore(uint32_t seconds) {
+  if (!this->network_) {
+    ESP_LOGW(TAG, "allow_restore: no key configured, restore over the network is not possible");
+    return;
+  }
   this->restore_until_ms_ = millis() + seconds * 1000;
   this->restore_open_ = seconds > 0;
   ESP_LOGW(TAG, "Restore window %s for %" PRIu32 " s", this->restore_open_ ? "OPEN" : "closed", seconds);
@@ -918,7 +927,7 @@ void FingerprintSyncComponent::allow_restore(uint32_t seconds) {
 // Sync decisions
 // ---------------------------------------------------------------------------------------------
 
-FingerprintSyncComponent::Decision FingerprintSyncComponent::decide_(uint16_t slot, uint16_t remote,
+FingerprintGrowPlusComponent::Decision FingerprintGrowPlusComponent::decide_(uint16_t slot, uint16_t remote,
                                                                      const uint8_t *remote_hash) const {
   Decision d;
   const uint16_t local = this->meta_[slot];
@@ -978,7 +987,7 @@ FingerprintSyncComponent::Decision FingerprintSyncComponent::decide_(uint16_t sl
   return d;
 }
 
-void FingerprintSyncComponent::process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta,
+void FingerprintGrowPlusComponent::process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta,
                                                        const uint8_t *hash, uint32_t expires) {
   if (slot >= this->capacity_ || !this->managed_(slot))
     return;
@@ -1017,7 +1026,7 @@ void FingerprintSyncComponent::process_manifest_entry_(Session &s, uint16_t slot
   }
 }
 
-void FingerprintSyncComponent::handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash,
+void FingerprintGrowPlusComponent::handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash,
                                                 uint32_t expires, const uint8_t *data, size_t len) {
   uint8_t digest[32];
   crypto::sha256(data, len, digest);
@@ -1069,7 +1078,7 @@ void FingerprintSyncComponent::handle_template_(Session &s, uint16_t slot, uint1
 // Sessions
 // ---------------------------------------------------------------------------------------------
 
-Session *FingerprintSyncComponent::session_by_gen_(uint32_t gen) {
+Session *FingerprintGrowPlusComponent::session_by_gen_(uint32_t gen) {
   if (gen == 0)
     return nullptr;
   if (this->inbound_.phase != Session::Phase::IDLE && this->inbound_.gen == gen)
@@ -1100,7 +1109,7 @@ static void reset_session(Session &s) {
   s.peer = nullptr;
 }
 
-void FingerprintSyncComponent::start_client_session_(const Peer &peer) {
+void FingerprintGrowPlusComponent::start_client_session_(const Peer &peer) {
   Session &s = this->outbound_;
   reset_session(s);
   s.is_client = true;
@@ -1114,7 +1123,7 @@ void FingerprintSyncComponent::start_client_session_(const Peer &peer) {
   this->transport_.connect(peer.host, peer.port);
 }
 
-void FingerprintSyncComponent::start_server_session_() {
+void FingerprintGrowPlusComponent::start_server_session_() {
   Session &s = this->inbound_;
   reset_session(s);
   s.is_client = false;
@@ -1126,13 +1135,13 @@ void FingerprintSyncComponent::start_server_session_() {
   s.channel.begin_server(this->psk_.data(), this->node_id_);
 }
 
-void FingerprintSyncComponent::send_message_(Session &s, const std::vector<uint8_t> &msg) {
+void FingerprintGrowPlusComponent::send_message_(Session &s, const std::vector<uint8_t> &msg) {
   if (!s.channel.seal(msg.data(), msg.size(), s.tx)) {
     ESP_LOGE(TAG, "Message too large or channel closed");
   }
 }
 
-void FingerprintSyncComponent::send_simple_(Session &s, uint8_t type, uint16_t slot, uint8_t value, bool with_value) {
+void FingerprintGrowPlusComponent::send_simple_(Session &s, uint8_t type, uint16_t slot, uint8_t value, bool with_value) {
   std::vector<uint8_t> msg;
   MsgWriter w(msg);
   w.u8(type);
@@ -1142,7 +1151,7 @@ void FingerprintSyncComponent::send_simple_(Session &s, uint8_t type, uint16_t s
   this->send_message_(s, msg);
 }
 
-void FingerprintSyncComponent::send_manifest_(Session &s) {
+void FingerprintGrowPlusComponent::send_manifest_(Session &s) {
   std::vector<uint16_t> slots;
   for (uint16_t slot = 0; slot < this->capacity_; slot++) {
     if (!this->managed_(slot))
@@ -1178,7 +1187,7 @@ void FingerprintSyncComponent::send_manifest_(Session &s) {
   }
 }
 
-void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uint8_t> &msg) {
+void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector<uint8_t> &msg) {
   if (msg.empty()) {
     this->end_session_(s, false, "empty message");
     return;
@@ -1301,7 +1310,7 @@ void FingerprintSyncComponent::handle_message_(Session &s, const std::vector<uin
     this->end_session_(s, false, "malformed message");
 }
 
-void FingerprintSyncComponent::end_session_(Session &s, bool ok, const char *reason) {
+void FingerprintGrowPlusComponent::end_session_(Session &s, bool ok, const char *reason) {
   if (s.phase == Session::Phase::IDLE)
     return;
   const char *who = s.is_client && s.peer != nullptr ? s.peer->host : "inbound peer";
@@ -1327,7 +1336,7 @@ void FingerprintSyncComponent::end_session_(Session &s, bool ok, const char *rea
   this->publish_diagnostics_();
 }
 
-void FingerprintSyncComponent::service_session_(Session &s) {
+void FingerprintGrowPlusComponent::service_session_(Session &s) {
   if (s.phase == Session::Phase::IDLE)
     return;
   const uint32_t now = millis();
@@ -1436,7 +1445,7 @@ void FingerprintSyncComponent::service_session_(Session &s) {
 // Rounds and main loop
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintSyncComponent::run_round_() {
+void FingerprintGrowPlusComponent::run_round_() {
   const uint32_t now = millis();
   if (!this->round_active_) {
     if (!this->ready_ || !this->round_requested_ || (int32_t) (now - this->round_due_ms_) < 0)
@@ -1524,7 +1533,7 @@ void FingerprintSyncComponent::run_round_() {
     this->request_round_(this->sync_interval_ms_);
 }
 
-void FingerprintSyncComponent::loop() {
+void FingerprintGrowPlusComponent::loop() {
   const uint32_t now = millis();
 
   if (!this->params_loaded_ && !this->refresh_queued_) {
@@ -1545,19 +1554,22 @@ void FingerprintSyncComponent::loop() {
     this->failed_sensor_ = false;
   }
 
-  // Network.
-  const bool may_accept = this->inbound_.phase == Session::Phase::IDLE;
-  this->transport_.loop(may_accept);
-  if (may_accept && this->transport_.inbound()->connected()) {
-    if (!this->ready_ || this->jobs_.size() > MAX_QUEUED_JOBS) {
-      ESP_LOGD(TAG, "Inbound connection refused: not ready");
-      this->transport_.inbound()->close();
-    } else {
-      this->start_server_session_();
+  // Network. Without a key the node runs stand-alone: rounds still re-read the local index and
+  // bookkeep local changes, they just have no peers.
+  if (this->network_) {
+    const bool may_accept = this->inbound_.phase == Session::Phase::IDLE;
+    this->transport_.loop(may_accept);
+    if (may_accept && this->transport_.inbound()->connected()) {
+      if (!this->ready_ || this->jobs_.size() > MAX_QUEUED_JOBS) {
+        ESP_LOGD(TAG, "Inbound connection refused: not ready");
+        this->transport_.inbound()->close();
+      } else {
+        this->start_server_session_();
+      }
     }
+    this->service_session_(this->inbound_);
+    this->service_session_(this->outbound_);
   }
-  this->service_session_(this->inbound_);
-  this->service_session_(this->outbound_);
   this->run_round_();
 
   this->admin_loop_();
@@ -1577,4 +1589,4 @@ void FingerprintSyncComponent::loop() {
   }
 }
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

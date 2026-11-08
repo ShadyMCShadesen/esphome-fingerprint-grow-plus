@@ -3,8 +3,8 @@
 ## Recommended rollout
 
 1. **Key.** Run `python3 tools/fpsync.py genkey` and put the key into `secrets.yaml` as
-   `fingerprint_sync_key`.
-2. **Two nodes first, dry run.** Add `fingerprint_sync` with `dry_run: true` to two nodes of the
+   `fingerprint_grow_plus_key`.
+2. **Two nodes first, dry run.** Add `fingerprint_grow_plus` with `dry_run: true` to two nodes of the
    same hardware and flash them.
 3. **Read the logs.** Look for:
    - `Index ready: N managed templates`
@@ -26,7 +26,7 @@
    Nodes that already hold fingers will report **conflicts** for every slot whose template
    differs. That is expected: the sync never guesses which finger is right.
    - Decide which node holds the correct assignment of fingers to slots (the *reference*).
-   - With backups of all sensors in place, run `fingerprint_sync.claim_all_slots` **on the
+   - With backups of all sensors in place, run `fingerprint_grow_plus.claim_all_slots` **on the
      reference node only**. All its templates become forced versions and replace the same slots on
      the other nodes. In `dry_run` they log `[dry run] would REPLACE slot …`.
    - Claim on **one** node only. If two nodes claim, the later claim wins per slot, which can mix
@@ -37,7 +37,7 @@
 
 ## Restore / rollback
 
-1. On the target node, open the restore window: run `fingerprint_sync.allow_restore`, e.g. from
+1. On the target node, open the restore window: run `fingerprint_grow_plus.allow_restore`, e.g. from
    a web UI button. It stays open for 5 minutes by default.
 2. Restore:
 
@@ -58,22 +58,22 @@ Install the new sensor and reboot the node. Its index is empty, which the sync t
 
 | what | how | scope |
 |---|---|---|
-| one finger everywhere | `fingerprint_sync.delete: <slot>` | cluster |
-| everything | `fingerprint_sync.delete_all` with code and `confirm_cluster_wide: true` | cluster (managed slots) |
+| one finger everywhere | `fingerprint_grow_plus.delete: <slot>` | cluster |
+| everything | `fingerprint_grow_plus.delete_all` with code and `confirm_cluster_wide: true` | cluster (managed slots) |
 | repair one node | `fingerprint_grow.delete` | local; restored from peers in the next round |
 
 ## Troubleshooting
 
 | log / symptom | meaning | fix |
 |---|---|---|
-| `server authentication failed (wrong key?)` | different `fingerprint_sync_key` on the nodes | use the same key everywhere |
+| `server authentication failed (wrong key?)` | different `fingerprint_grow_plus_key` on the nodes | use the same key everywhere |
 | `not reachable` | peer offline, wrong address, firewall | check `peers`, port 18530, `allowed_networks` |
 | `Inbound connection refused: not ready` | node still indexing after boot | normal for the first seconds |
-| `CONFLICT in slot X` | different fingers in the same slot | `fingerprint_sync.resolve_conflict` (slot, `keep_local`) |
+| `CONFLICT in slot X` | different fingers in the same slot | `fingerprint_grow_plus.resolve_conflict` (slot, `keep_local`) |
 | `Verification of slot X failed` | sensor stored something else than sent | check wiring/power; compatibility test A1 |
 | `Template bytes of slot X changed since indexing` | sensor returns different bytes for the same slot (assumption A2 false) | harmless; the sync falls back to the sensor's own match |
 | `Connection lost: 0` (warning from the TCP helper) | peer closed the connection after a finished session | harmless |
-| `Verification of slot X failed` right after a sync write | the template did not arrive byte-identical | run `fingerprint_sync.self_test`; the `round trip` lines show whether transfers are lossless |
+| `Verification of slot X failed` right after a sync write | the template did not arrive byte-identical | run `fingerprint_grow_plus.self_test`; the `round trip` lines show whether transfers are lossless |
 | `Sensor parameters unreliable` | two `ReadSysPara` answers differed or were implausible | retried automatically; power-cycle the sensor if it persists |
 | status `sensor error` | `fingerprint_grow` failed / sensor not answering | check sensor, power, UART |
 | sync never runs | enrollment still active (a started enrollment blocks the sensor buffers) | finish or cancel the enrollment |

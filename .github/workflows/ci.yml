@@ -49,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [esp32-arduino, esp32-idf, esp8266]
+        example: [esp32-arduino, esp32-idf, esp8266, standalone]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,7 +62,7 @@ jobs:
           cat > secrets.yaml <<'SECRETS'
           wifi_ssid: "ci-ssid"
           wifi_password: "ci-password"
-          fingerprint_sync_key: "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="
+          fingerprint_grow_plus_key: "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="
           fingerprint_delete_all_code: "CI_ONLY_CODE"
           SECRETS
       - uses: actions/cache@v4

@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-using namespace esphome::fingerprint_sync;
+using namespace esphome::fingerprint_grow_plus;
 
 static int failures = 0;
 #define CHECK(cond, msg) \

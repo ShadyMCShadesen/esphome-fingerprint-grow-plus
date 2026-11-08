@@ -13,7 +13,7 @@
 #include "esphome/components/sha256/sha256.h"
 #endif
 
-namespace esphome::fingerprint_sync::crypto {
+namespace esphome::fingerprint_grow_plus::crypto {
 
 static inline uint32_t rotl32(uint32_t v, int c) { return (v << c) | (v >> (32 - c)); }
 
@@ -159,4 +159,4 @@ bool random(uint8_t *data, size_t len) {
 #endif
 }
 
-}  // namespace esphome::fingerprint_sync::crypto
+}  // namespace esphome::fingerprint_grow_plus::crypto

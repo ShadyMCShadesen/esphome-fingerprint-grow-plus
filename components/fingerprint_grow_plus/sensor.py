@@ -1,4 +1,4 @@
-"""Optional diagnostic sensors of fingerprint_sync."""
+"""Optional diagnostic sensors of fingerprint_grow_plus."""
 
 import esphome.codegen as cg
 from esphome.components import sensor
@@ -9,9 +9,9 @@ from esphome.const import (
     STATE_CLASS_MEASUREMENT,
 )
 
-from . import CONF_FINGERPRINT_SYNC_ID, FingerprintSyncComponent
+from . import CONF_FINGERPRINT_SYNC_ID, FingerprintGrowPlusComponent
 
-DEPENDENCIES = ["fingerprint_sync"]
+DEPENDENCIES = ["fingerprint_grow_plus"]
 
 CONF_PEERS_REACHABLE = "peers_reachable"
 CONF_ERROR_COUNT = "error_count"
@@ -20,7 +20,7 @@ CONF_LAST_SYNC = "last_sync"
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(CONF_FINGERPRINT_SYNC_ID): cv.use_id(FingerprintSyncComponent),
+        cv.GenerateID(CONF_FINGERPRINT_SYNC_ID): cv.use_id(FingerprintGrowPlusComponent),
         cv.Optional(CONF_PEERS_REACHABLE): sensor.sensor_schema(
             icon="mdi:lan-connect",
             accuracy_decimals=0,

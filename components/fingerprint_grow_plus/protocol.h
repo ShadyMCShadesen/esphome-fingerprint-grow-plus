@@ -8,7 +8,7 @@
 #include <cstring>
 #include <vector>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 static constexpr uint8_t PROTOCOL_VERSION = 2;
 
@@ -126,4 +126,4 @@ class MsgReader {
   bool ok_{true};
 };
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

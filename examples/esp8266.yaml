@@ -26,7 +26,7 @@ external_components:
   - source:
       type: local
       path: ../components
-    components: [fingerprint_sync]
+    components: [fingerprint_grow_plus]
 
 uart:
   id: uart_sensor
@@ -35,7 +35,7 @@ uart:
   baud_rate: 57600
 
 packages:
-  fingerprint_sync: !include common-fingerprint-sync.yaml
+  fingerprint_grow_plus: !include common-fingerprint-grow-plus.yaml
 
-fingerprint_sync:
+fingerprint_grow_plus:
   metadata_storage: sensor_notepad

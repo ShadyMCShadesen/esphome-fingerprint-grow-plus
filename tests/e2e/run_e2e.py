@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end test: several fingerprint_sync nodes on the ESPHome host platform.
+"""End-to-end test: several fingerprint_grow_plus nodes on the ESPHome host platform.
 
 Each node is the real firmware (ESPHome host build) talking to a simulated R503
 (tests/sim/r503_sim.py) through a pseudo terminal. Nodes sync over TCP on localhost.
@@ -35,6 +35,8 @@ NODES = {
     "node-d": {"port": 18534, "peers": ["node-a"], "include": ["0-199"], "exclude": [], "key": WRONG_KEY},
     # node-e runs in dry-run mode: it must log what it would do and change nothing
     "node-e": {"port": 18535, "peers": ["node-a"], "include": ["0-199"], "exclude": [], "dry_run": True},
+    # node-f runs stand-alone (no key): admin features only, no network port
+    "node-f": {"port": 0, "peers": [], "include": ["0-199"], "exclude": [], "standalone": True},
 }
 
 SEEDS = {
@@ -44,6 +46,7 @@ SEEDS = {
     "node-c": {"2": {"finger": "dave"}, "150": {"finger": "eve"}},
     "node-d": {"7": {"finger": "mallory"}},
     "node-e": {"9": {"finger": "grace"}},
+    "node-f": {"0": {"finger": "admin"}},
 }
 
 YAML_TEMPLATE = """
@@ -56,7 +59,7 @@ external_components:
   - source:
       type: local
       path: {components}
-    components: [fingerprint_sync]
+    components: [fingerprint_grow_plus]
 time:
   - platform: host
     id: host_time
@@ -77,17 +80,17 @@ sensor:
     capacity:
       name: Fingerprint Capacity
       id: fp_capacity
-  - platform: fingerprint_sync
+  - platform: fingerprint_grow_plus
     peers_reachable:
       name: Peers reachable
     conflict_count:
       name: Sync conflicts
 text_sensor:
-  - platform: fingerprint_sync
+  - platform: fingerprint_grow_plus
     status:
       name: Sync status
-fingerprint_sync:
-  id: fp_sync
+fingerprint_grow_plus:
+  id: fp_plus
   key: "{key}"
   port: {port}
   peers: {peers}
@@ -157,16 +160,16 @@ interval:
           remove("{cmd}");
           if (n < 1) return;
           std::string c(cmd);
-          if (c == "delete") id(fp_sync).delete_slot(a);
-          else if (c == "resolve") id(fp_sync).resolve_conflict(a, b != 0);
-          else if (c == "sync") id(fp_sync).sync_now();
-          else if (c == "delete_all") id(fp_sync).delete_all("TEST_ALL");
-          else if (c == "delete_all_wrong") id(fp_sync).delete_all("nope");
-          else if (c == "allow_restore") id(fp_sync).allow_restore(120);
-          else if (c == "self_test") id(fp_sync).self_test(a, b);
-          else if (c == "resolve_all") id(fp_sync).resolve_all_conflicts(a != 0);
-          else if (c == "claim_all") id(fp_sync).claim_all_slots();
-          else if (c == "enroll_guest") id(fp_sync).enroll_guest(2, 25);
+          if (c == "delete") id(fp_plus).delete_slot(a);
+          else if (c == "resolve") id(fp_plus).resolve_conflict(a, b != 0);
+          else if (c == "sync") id(fp_plus).sync_now();
+          else if (c == "delete_all") id(fp_plus).delete_all("TEST_ALL");
+          else if (c == "delete_all_wrong") id(fp_plus).delete_all("nope");
+          else if (c == "allow_restore") id(fp_plus).allow_restore(120);
+          else if (c == "self_test") id(fp_plus).self_test(a, b);
+          else if (c == "resolve_all") id(fp_plus).resolve_all_conflicts(a != 0);
+          else if (c == "claim_all") id(fp_plus).claim_all_slots();
+          else if (c == "enroll_guest") id(fp_plus).enroll_guest(2, 25);
 """
 
 
@@ -198,6 +201,11 @@ class Cluster:
                 exclude=json.dumps(cfg["exclude"]),
                 dry_run="true" if cfg.get("dry_run") else "false",
             )
+            if cfg.get("standalone"):
+                head, tail = yaml.split("\nfingerprint_grow_plus:\n", 1)
+                tail = "\n".join(l for l in tail.splitlines()
+                                  if not l.startswith(("  key:", "  port:", "  peers:")))
+                yaml = head + "\nfingerprint_grow_plus:\n" + tail
             yaml_path = self.path(name, "yaml")
             yaml_path.write_text(yaml, encoding="utf-8")
             print(f"== compiling {name}", flush=True)
@@ -551,6 +559,21 @@ def main():
         c.touch("node-a", "frank")
         results.append(wait_until("frank (slot 3) deleted on A, B and C by the admin gesture",
                                   lambda: all(3 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 60))
+
+        print("== Scenario 10: stand-alone node (no key) enrolls with the admin gesture")
+        results.append(wait_until("stand-alone node reports the network sync as off",
+                                  lambda: "Network sync: off" in c.log("node-f"), 5))
+        c.touch("node-f", "admin")
+        time.sleep(1.5)
+        c.touch("node-f", "admin")
+        results.append(wait_until("enrollment started for slot 1 on the stand-alone node",
+                                  lambda: "TEST-EVENT enroll_started 1" in c.log("node-f"), 20))
+        time.sleep(1.5)
+        c.touches("node-f", "zoe", 2, gap=1.5)
+        results.append(wait_until("zoe enrolled in slot 1 on the stand-alone node",
+                                  lambda: c.slots("node-f").get(1) == "zoe", 30))
+        results.append(wait_until("the stand-alone finger stays local",
+                                  lambda: all(c.slots(n).get(1) != "zoe" for n in ("node-a", "node-b", "node-c")), 1))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))

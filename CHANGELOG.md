@@ -5,6 +5,16 @@ versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Renamed to `fingerprint_grow_plus`** (repository `esphome-fingerprint-grow-plus`): the component
+  is an extension of `fingerprint_grow`, and the sync is one optional part. Replace
+  `fingerprint_sync` with `fingerprint_grow_plus` in YAML (block, actions, conditions, sensor
+  platforms). Stored metadata, guest expiry dates, backups and the sync protocol are unchanged.
+
+### Added
+- Stand-alone mode: without `key` the node opens no network port and uses admin fingers, guests,
+  protected slots and button enrollment locally.
+
 ### Added
 - Admin gestures: delete a finger on all nodes (3 touches + finger), re-enroll a finger into its
   own slot (4 touches + finger), status on hold (`on_admin_hold`, `health()`); new triggers
@@ -34,11 +44,11 @@ versioning: [Semantic Versioning](https://semver.org/).
   last touch; `admin: touches` is now `enroll_touches` (old name still accepted).
 
 ### Added
-- `fingerprint_sync.self_test` action: step-by-step LoadChar/UpChar/DownChar/Match diagnosis on
+- `fingerprint_grow_plus.self_test` action: step-by-step LoadChar/UpChar/DownChar/Match diagnosis on
   the own sensor (buffers only).
 
-- `fingerprint_sync.claim_all_slots` (make one node the reference) and
-  `fingerprint_sync.resolve_all_conflicts` for the initial rollout.
+- `fingerprint_grow_plus.claim_all_slots` (make one node the reference) and
+  `fingerprint_grow_plus.resolve_all_conflicts` for the initial rollout.
 - `self_test` option `compare_slot` to score two different slots.
 
 ### Changed
@@ -73,7 +83,7 @@ versioning: [Semantic Versioning](https://semver.org/).
 ## [0.1.0] - 2026-11-07
 
 ### Added
-- `fingerprint_sync` external component: direct node-to-node sync of GROW fingerprint
+- `fingerprint_grow_plus` external component: direct node-to-node sync of GROW fingerprint
   templates with preserved slot IDs (TCP, pre-shared key, ChaCha20 + HMAC-SHA256).
 - Anti-entropy sync with Lamport versions, tombstones, conflict detection via the sensor's
   1:1 match, convergence of separately enrolled identical fingers.

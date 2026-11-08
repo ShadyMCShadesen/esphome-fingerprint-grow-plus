@@ -18,7 +18,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 enum GrowCode : uint8_t {
   GROW_OK = 0x00,
@@ -110,4 +110,4 @@ class GrowLink {
   uint8_t last_params_raw_[16]{};
 };
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

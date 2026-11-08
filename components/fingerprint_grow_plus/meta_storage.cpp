@@ -4,9 +4,9 @@
 
 #include <cstring>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
-static const char *const TAG = "fingerprint_sync.store";
+static const char *const TAG = "fingerprint_grow_plus.store";
 static const uint8_t NOTEPAD_MAGIC[4] = {'F', 'P', 'S', 'M'};
 
 void PreferenceStorage::ensure_prefs_(size_t chunks) {
@@ -96,4 +96,4 @@ bool NotepadStorage::save(const std::vector<uint16_t> &meta) {
   return true;
 }
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 static constexpr size_t PSK_SIZE = 32;
 static constexpr size_t MAX_RECORD_BODY = 2560;
@@ -84,4 +84,4 @@ class SecureChannel {
   const char *error_{""};
 };
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

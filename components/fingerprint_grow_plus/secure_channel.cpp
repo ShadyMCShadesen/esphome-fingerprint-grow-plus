@@ -3,7 +3,7 @@
 
 #include <cstring>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 // The last byte is the protocol version: nodes with different versions refuse each other.
 static const uint8_t MAGIC[4] = {'F', 'P', 'S', 0x02};
@@ -259,4 +259,4 @@ bool SecureChannel::seal(const uint8_t *msg, size_t len, std::vector<uint8_t> &o
   return true;
 }
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

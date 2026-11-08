@@ -22,7 +22,7 @@ CODEOWNERS = ["@ShadyMCShadesen"]
 DEPENDENCIES = ["uart", "fingerprint_grow", "network"]
 AUTO_LOAD = ["socket", "sha256", "hmac_sha256", "sensor", "binary_sensor"]
 
-CONF_FINGERPRINT_SYNC_ID = "fingerprint_sync_id"
+CONF_FINGERPRINT_SYNC_ID = "fingerprint_grow_plus_id"
 CONF_HOST = "host"
 CONF_SLOT = "slot"
 CONF_CODE = "code"
@@ -72,11 +72,11 @@ CONF_VALID_FOR = "valid_for"
 
 DEFAULT_PORT = 18530
 
-fingerprint_sync_ns = cg.esphome_ns.namespace("fingerprint_sync")
-FingerprintSyncComponent = fingerprint_sync_ns.class_(
-    "FingerprintSyncComponent", cg.Component, uart.UARTDevice
+fingerprint_grow_plus_ns = cg.esphome_ns.namespace("fingerprint_grow_plus")
+FingerprintGrowPlusComponent = fingerprint_grow_plus_ns.class_(
+    "FingerprintGrowPlusComponent", cg.Component, uart.UARTDevice
 )
-MetaBackend = fingerprint_sync_ns.enum("MetaBackend", is_class=True)
+MetaBackend = fingerprint_grow_plus_ns.enum("MetaBackend", is_class=True)
 METADATA_STORAGE = {
     "preferences": MetaBackend.PREFERENCES,
     "sensor_notepad": MetaBackend.NOTEPAD,
@@ -200,6 +200,13 @@ def _default_metadata_storage(config):
 
 
 def _validate(config):
+    if CONF_KEY not in config:
+        for opt in (CONF_PEERS, CONF_ALLOWED_NETWORKS):
+            if config.get(opt):
+                raise cv.Invalid(
+                    f"{opt} needs a key (without a key the node runs stand-alone)",
+                    path=[opt],
+                )
     if CONF_ADMIN in config and CONF_GUEST_TOUCHES not in config[CONF_ADMIN]:
         config = dict(config)
         admin = dict(config[CONF_ADMIN])
@@ -224,14 +231,24 @@ def _validate(config):
     return config
 
 
+def _consume_sockets(config):
+    # Only a node with a key syncs over the network: one inbound, one outbound, one listener.
+    if CONF_KEY in config:
+        config = socket.consume_sockets(2, "fingerprint_grow_plus")(config)
+        config = socket.consume_sockets(
+            1, "fingerprint_grow_plus", socket.SocketType.TCP_LISTEN
+        )(config)
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
-            cv.GenerateID(): cv.declare_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.declare_id(FingerprintGrowPlusComponent),
             cv.GenerateID(CONF_FINGERPRINT_GROW_ID): cv.use_id(
                 fingerprint_grow.FingerprintGrowComponent
             ),
-            cv.Required(CONF_KEY): validate_key,
+            cv.Optional(CONF_KEY): validate_key,
             cv.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
             cv.Optional(CONF_PEERS, default=[]): cv.ensure_list(validate_peer),
             cv.Optional(CONF_ALLOWED_NETWORKS): socket.IPV4_ALLOW_SCHEMA,
@@ -279,12 +296,11 @@ CONFIG_SCHEMA = cv.All(
     .extend(uart.UART_DEVICE_SCHEMA),
     _default_metadata_storage,
     _validate,
-    socket.consume_sockets(2, "fingerprint_sync"),
-    socket.consume_sockets(1, "fingerprint_sync", socket.SocketType.TCP_LISTEN),
+    _consume_sockets,
 )
 
 FINAL_VALIDATE_SCHEMA = uart.final_validate_device_schema(
-    "fingerprint_sync", baud_rate=None, require_tx=True, require_rx=True
+    "fingerprint_grow_plus", baud_rate=None, require_tx=True, require_rx=True
 )
 
 _CALLBACK_AUTOMATIONS = (
@@ -334,14 +350,19 @@ async def to_code(config):
     grow = await cg.get_variable(config[CONF_FINGERPRINT_GROW_ID])
     cg.add(var.set_fingerprint_grow(grow))
 
-    key = base64.b64decode(config[CONF_KEY])
-    cg.add(
-        var.set_key(
-            cg.RawExpression(
-                "std::array<uint8_t, 32>{" + ", ".join(f"0x{b:02X}" for b in key) + "}"
+    if CONF_KEY in config:
+        key = base64.b64decode(config[CONF_KEY])
+        cg.add(
+            var.set_key(
+                cg.RawExpression(
+                    "std::array<uint8_t, 32>{"
+                    + ", ".join(f"0x{b:02X}" for b in key)
+                    + "}"
+                )
             )
         )
-    )
+    # The transport code is always compiled (defines only); without a key it is never started.
+    socket.require_tcp_listener()
     cg.add(var.set_port(config[CONF_PORT]))
     cg.add(var.set_sensor_address(config[CONF_SENSOR_ADDRESS]))
     for peer in config[CONF_PEERS]:
@@ -396,7 +417,6 @@ async def to_code(config):
     if networks := config.get(CONF_ALLOWED_NETWORKS):
         socket.add_ipv4_allow(var.set_allowed_networks, networks, config[CONF_ID])
 
-    socket.require_tcp_listener()
     await automation.build_callback_automations(var, config, _CALLBACK_AUTOMATIONS)
 
 
@@ -404,19 +424,19 @@ async def to_code(config):
 # Actions and conditions
 # ---------------------------------------------------------------------------------------
 
-_PARENT_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(FingerprintSyncComponent)})
+_PARENT_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent)})
 
 automation.register_apply_action(
-    "fingerprint_sync.sync",
+    "fingerprint_grow_plus.sync",
     _PARENT_SCHEMA,
     automation.ApplyCall("sync_now()"),
 )
 
 automation.register_apply_action(
-    "fingerprint_sync.delete",
+    "fingerprint_grow_plus.delete",
     cv.maybe_simple_value(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Required(CONF_SLOT): cv.templatable(cv.uint16_t),
         },
         key=CONF_SLOT,
@@ -434,10 +454,10 @@ def _must_be_true(value):
 
 
 automation.register_apply_action(
-    "fingerprint_sync.delete_all",
+    "fingerprint_grow_plus.delete_all",
     cv.Schema(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Required(CONF_CODE): cv.templatable(cv.string),
             cv.Required(CONF_CONFIRM_CLUSTER_WIDE): _must_be_true,
         }
@@ -446,10 +466,10 @@ automation.register_apply_action(
 )
 
 automation.register_apply_action(
-    "fingerprint_sync.enroll_next_free",
+    "fingerprint_grow_plus.enroll_next_free",
     cv.maybe_simple_value(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Optional(CONF_NUM_SCANS, default=3): cv.templatable(
                 cv.int_range(min=1, max=6)
             ),
@@ -460,10 +480,10 @@ automation.register_apply_action(
 )
 
 automation.register_apply_action(
-    "fingerprint_sync.resolve_conflict",
+    "fingerprint_grow_plus.resolve_conflict",
     cv.Schema(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Required(CONF_SLOT): cv.templatable(cv.uint16_t),
             cv.Required(CONF_KEEP_LOCAL): cv.templatable(cv.boolean),
         }
@@ -475,10 +495,10 @@ automation.register_apply_action(
 )
 
 automation.register_apply_action(
-    "fingerprint_sync.allow_restore",
+    "fingerprint_grow_plus.allow_restore",
     cv.maybe_simple_value(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Optional(CONF_DURATION, default="5min"): cv.templatable(
                 cv.positive_time_period_seconds
             ),
@@ -489,10 +509,10 @@ automation.register_apply_action(
 )
 
 automation.register_apply_action(
-    "fingerprint_sync.self_test",
+    "fingerprint_grow_plus.self_test",
     cv.maybe_simple_value(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Optional(CONF_SLOT, default=0): cv.templatable(cv.uint16_t),
             # 65535 = none; otherwise also score this slot against compare_slot
             cv.Optional(CONF_COMPARE_SLOT, default=65535): cv.templatable(cv.uint16_t),
@@ -505,16 +525,16 @@ automation.register_apply_action(
 )
 
 automation.register_apply_action(
-    "fingerprint_sync.claim_all_slots",
+    "fingerprint_grow_plus.claim_all_slots",
     _PARENT_SCHEMA,
     automation.ApplyCall("claim_all_slots()"),
 )
 
 automation.register_apply_action(
-    "fingerprint_sync.resolve_all_conflicts",
+    "fingerprint_grow_plus.resolve_all_conflicts",
     cv.Schema(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Required(CONF_KEEP_LOCAL): cv.templatable(cv.boolean),
         }
     ),
@@ -522,21 +542,21 @@ automation.register_apply_action(
 )
 
 automation.register_apply_action(
-    "fingerprint_sync.delete_next_finger", _PARENT_SCHEMA, automation.ApplyCall("delete_next_finger()")
+    "fingerprint_grow_plus.delete_next_finger", _PARENT_SCHEMA, automation.ApplyCall("delete_next_finger()")
 )
 automation.register_apply_action(
-    "fingerprint_sync.reenroll_next_finger",
+    "fingerprint_grow_plus.reenroll_next_finger",
     _PARENT_SCHEMA,
     automation.ApplyCall("reenroll_next_finger()"),
 )
 automation.register_apply_action(
-    "fingerprint_sync.cancel_admin", _PARENT_SCHEMA, automation.ApplyCall("cancel_admin()")
+    "fingerprint_grow_plus.cancel_admin", _PARENT_SCHEMA, automation.ApplyCall("cancel_admin()")
 )
 automation.register_apply_action(
-    "fingerprint_sync.delete_admin",
+    "fingerprint_grow_plus.delete_admin",
     cv.Schema(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Required(CONF_SLOT): cv.templatable(cv.uint16_t),
             cv.Required(CONF_CODE): cv.templatable(cv.string),
         }
@@ -546,10 +566,10 @@ automation.register_apply_action(
     ),
 )
 automation.register_apply_action(
-    "fingerprint_sync.enroll_guest",
+    "fingerprint_grow_plus.enroll_guest",
     cv.Schema(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Optional(CONF_NUM_SCANS, default=3): cv.templatable(cv.int_range(min=1, max=6)),
             cv.Optional(CONF_VALID_FOR, default="7d"): cv.templatable(
                 cv.positive_time_period_seconds
@@ -561,10 +581,10 @@ automation.register_apply_action(
     ),
 )
 automation.register_apply_action(
-    "fingerprint_sync.extend_guest",
+    "fingerprint_grow_plus.extend_guest",
     cv.Schema(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Required(CONF_SLOT): cv.templatable(cv.uint16_t),
             cv.Optional(CONF_VALID_FOR, default="7d"): cv.templatable(
                 cv.positive_time_period_seconds
@@ -577,13 +597,13 @@ automation.register_apply_action(
 )
 
 automation.register_apply_condition(
-    "fingerprint_sync.is_admin_busy", _PARENT_SCHEMA, "is_admin_busy()"
+    "fingerprint_grow_plus.is_admin_busy", _PARENT_SCHEMA, "is_admin_busy()"
 )
 automation.register_apply_condition(
-    "fingerprint_sync.is_admin_slot",
+    "fingerprint_grow_plus.is_admin_slot",
     cv.maybe_simple_value(
         {
-            cv.GenerateID(): cv.use_id(FingerprintSyncComponent),
+            cv.GenerateID(): cv.use_id(FingerprintGrowPlusComponent),
             cv.Required(CONF_SLOT): cv.templatable(cv.uint16_t),
         },
         key=CONF_SLOT,
@@ -592,8 +612,8 @@ automation.register_apply_condition(
 )
 
 automation.register_apply_condition(
-    "fingerprint_sync.is_syncing", _PARENT_SCHEMA, "is_syncing()"
+    "fingerprint_grow_plus.is_syncing", _PARENT_SCHEMA, "is_syncing()"
 )
 automation.register_apply_condition(
-    "fingerprint_sync.is_ready", _PARENT_SCHEMA, "is_ready()"
+    "fingerprint_grow_plus.is_ready", _PARENT_SCHEMA, "is_ready()"
 )

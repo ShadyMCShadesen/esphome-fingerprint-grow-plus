@@ -1,0 +1,85 @@
+# Example: one ESP32 node without sync. Admin finger in slot 0 (enroll it once with
+# fingerprint_grow.enroll), guest fingers in slots 150-179. No network port is opened.
+substitutions:
+  sensing_pin: GPIO4
+
+esphome:
+  name: reader-shed
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+api:
+ota:
+  platform: esphome
+
+external_components:
+  # For your own nodes use a pinned release instead:
+  #   - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@v0.1.0
+  - source:
+      type: local
+      path: ../components
+    components: [fingerprint_grow_plus]
+
+uart:
+  rx_pin: GPIO16
+  tx_pin: GPIO17
+  baud_rate: 57600
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+binary_sensor:
+  - platform: gpio
+    id: finger_detected
+    name: Finger detected
+    pin:
+      number: ${sensing_pin}
+      inverted: true
+
+fingerprint_grow:
+  id: grow
+  on_finger_scan_matched:
+    - if:
+        condition:
+          not:
+            or:
+              - fingerprint_grow_plus.is_admin_slot: !lambda return finger_id;
+              - fingerprint_grow_plus.is_admin_busy:
+        then:
+          - logger.log:
+              format: "Access granted for slot %u"
+              args: [finger_id]
+
+fingerprint_grow_plus:
+  id: fp_plus
+  finger_sensor: finger_detected
+  time_id: sntp_time
+  admin:
+  guests: "150-179"
+  on_admin_touch:
+    - fingerprint_grow.aura_led_control:
+        state: FLASHING
+        speed: 50
+        color: CYAN
+        count: 0
+  on_enroll_started:
+    - fingerprint_grow.aura_led_control:
+        state: FLASHING
+        speed: 50
+        color: PURPLE
+        count: 0
+  on_admin_gesture:
+    - fingerprint_grow.aura_led_control:
+        state: BREATHING
+        speed: 100
+        color: BLUE
+        count: 0

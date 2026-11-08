@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fpsync - backup, restore and inspection tool for fingerprint_sync nodes.
+"""fpsync - backup, restore and inspection tool for fingerprint_grow_plus nodes.
 
 Standard library only. Speaks the same authenticated, encrypted protocol as the nodes
 (see docs/protocol.md) and therefore needs the shared key.
@@ -340,7 +340,7 @@ def cmd_restore(args):
             print(f"  slot {slot}: restored")
         elif result == 2:
             finish(ch)
-            sys.exit("Node refused the restore: run the fingerprint_sync.allow_restore action on the node first")
+            sys.exit("Node refused the restore: run the fingerprint_grow_plus.allow_restore action on the node first")
         else:
             print(f"  slot {slot}: FAILED on the node", file=sys.stderr)
     finish(ch)

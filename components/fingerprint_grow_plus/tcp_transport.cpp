@@ -2,7 +2,7 @@
 
 #include "esphome/core/log.h"
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 void TcpTransport::setup(const char *log_tag) {
   this->tag_ = log_tag;
@@ -35,4 +35,4 @@ void TcpTransport::dump_config() {
   this->listener_.dump_config();
 }
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

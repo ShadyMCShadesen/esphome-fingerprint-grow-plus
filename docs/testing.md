@@ -5,7 +5,7 @@
 | test | command | covers |
 |---|---|---|
 | crypto unit tests | `tests/run_unit_tests.sh` | ChaCha20 vs OpenSSL, HKDF vs RFC 5869, handshake, tamper/replay/wrong key/self connection, byte-exact interop with `tools/fpsync.py` |
-| end-to-end | `python3 tests/e2e/run_e2e.py` | 5 real firmware builds (ESPHome host platform) + simulated R503 sensors, see below |
+| end-to-end | `python3 tests/e2e/run_e2e.py` | 6 real firmware builds (ESPHome host platform) + simulated R503 sensors, see below |
 | config + compile | GitHub Actions | `esphome config` and `esphome compile` for ESP32 Arduino, ESP32 ESP-IDF, ESP8266 |
 
 End-to-end scenarios:
@@ -29,10 +29,11 @@ End-to-end scenarios:
 7. Restore from the backup is refused without a restore window, works with one, and propagates.
 8. Hostile peers are cut off (handshake timeout, duplicate manifest).
 9. An admin deletes a finger on all nodes by presenting it after 3 touches.
-10. `SetPwd` is never sent to any sensor.
+10. A stand-alone node (no key) enrolls with the admin gesture; the finger stays local.
+11. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
-`fingerprint_grow` and `fingerprint_sync` with synthetic templates (no real biometric data).
+`fingerprint_grow` and `fingerprint_grow_plus` with synthetic templates (no real biometric data).
 
 ## Hardware test plan
 
@@ -46,7 +47,7 @@ Recommended for the proof of concept: two nodes with the same hardware but diffe
 | A1 | a template exported from sensor X matches on sensor Y | limit both nodes to one test slot (`include_slots: ["190"]`, `dry_run: false`), enroll a test finger there on node 1, sync, touch node 2 | `on_finger_scan_matched` with the same slot on node 2 |
 | A2 | `UpChar` of a slot returns identical bytes each time | log line `Template bytes of slot … changed` must not appear after two rounds | no such line (if it appears: harmless, sync still correct) |
 | A3 | template size and packet size | check `Slot N indexed (template … bytes)` and `Sensor: capacity …, packet size …` | **observed on R503: 1536 bytes, 128-byte packets** (manual: 768) |
-| A4 | a template survives sensor → ESP → sensor unchanged | run `fingerprint_sync.self_test` and read `SELF TEST 2/3/4: round trip …` | **observed on R503: BYTE-IDENTICAL with 0, 10 and 40 ms gaps** (10 ms default kept as margin) |
+| A4 | a template survives sensor → ESP → sensor unchanged | run `fingerprint_grow_plus.self_test` and read `SELF TEST 2/3/4: round trip …` | **observed on R503: BYTE-IDENTICAL with 0, 10 and 40 ms gaps** (10 ms default kept as margin) |
 | A5 | `Match` template vs template | `self_test` variants 1 and 5 | **observed on R503: arbitrary scores (0 or 92 for the same pair)** → not used by the sync |
 
 ### B. Functional tests

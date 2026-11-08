@@ -7,7 +7,7 @@
  │ fingerprint_grow  (official)   │            │ fingerprint_grow               │
  │   matching, enroll, LED        │            │                                │
  │        ▲  callbacks            │            │                                │
- │ fingerprint_sync               │  TCP 18530 │ fingerprint_sync               │
+ │ fingerprint_grow_plus               │  TCP 18530 │ fingerprint_grow_plus               │
  │   GrowLink ──UART── R503       │◄──────────►│   GrowLink ──UART── R503       │
  │   job queue (1 job / loop)     │  encrypted │                                │
  │   SlotStore (meta + hashes)    │            │                                │
@@ -15,9 +15,9 @@
  └────────────────────────────────┘            └────────────────────────────────┘
 ```
 
-`fingerprint_sync` is a separate component on the same UART bus as `fingerprint_grow`.
+`fingerprint_grow_plus` is a separate component on the same UART bus as `fingerprint_grow`.
 The official class is `final` and its protocol helpers are `protected`, so it can be neither
-subclassed nor reused. `fingerprint_sync` therefore has its own small driver (`GrowLink`) for the
+subclassed nor reused. `fingerprint_grow_plus` therefore has its own small driver (`GrowLink`) for the
 template commands of the R503 manual (`LoadChar`, `UpChar`, `DownChar`, `Store`, `DeletChar`,
 `Match`, `ReadSysPara`, `TempleteNum`, `ReadIndexTable`, `ReadNotepad`, `WriteNotepad`).
 `SetPwd` and `SetSysPara` are not implemented: the sensor password and parameters are never changed.
@@ -63,7 +63,7 @@ A sync **round** is started:
 - after boot,
 - 2 s after a local change (push),
 - every `sync_interval`,
-- by `fingerprint_sync.sync`.
+- by `fingerprint_grow_plus.sync`.
 
 A round first re-reads the sensor's index table, which also catches changes made by
 `fingerprint_grow` actions. It then opens one session per peer, one after the other. In a session
@@ -113,7 +113,7 @@ Resolve a conflict with `resolve_conflict(slot, keep_local)`, or all of them wit
 
 **Deletion:**
 
-- `fingerprint_sync.delete` writes a tombstone with a new version, which propagates.
+- `fingerprint_grow_plus.delete` writes a tombstone with a new version, which propagates.
 - `delete_all` requires the configured code (and `confirm_cluster_wide: true` in YAML). It writes
   tombstones for all managed slots. Slots excluded from the sync on a node are never touched.
 

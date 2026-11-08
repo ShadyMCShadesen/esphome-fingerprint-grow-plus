@@ -6,7 +6,7 @@
 #include "esphome/components/socket/tcp_client_link.h"
 #include "esphome/components/socket/tcp_listener.h"
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 /// Stream adapter around ESPHome's TcpClientLink.
 class TcpStream final : public Stream {
@@ -54,4 +54,4 @@ class TcpTransport final : public Transport {
   TcpStream outbound_stream_{&outbound_link_, &connecting_};
 };
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

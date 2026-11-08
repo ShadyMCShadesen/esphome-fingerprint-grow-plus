@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 class MetaStorage {
  public:
@@ -68,4 +68,4 @@ class NotepadStorage final : public MetaStorage {
   bool image_valid_{false};
 };
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

@@ -25,7 +25,7 @@ entry that equals its own name or `name.local`, and refuses connections from its
 Nothing to configure besides `peers`. Optional hardening:
 
 ```yaml
-fingerprint_sync:
+fingerprint_grow_plus:
   allowed_networks: [192.168.10.0/24]
 ```
 

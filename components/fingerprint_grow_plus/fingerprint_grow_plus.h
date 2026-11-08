@@ -31,7 +31,7 @@
 #include <string>
 #include <vector>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 struct Peer {
   const char *host;
@@ -103,11 +103,14 @@ struct Session {
   uint16_t served{0};
 };
 
-class FingerprintSyncComponent : public Component, public uart::UARTDevice {
+class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
  public:
   // ---- configuration (called from generated code) ----
   void set_fingerprint_grow(fingerprint_grow::FingerprintGrowComponent *grow) { this->grow_ = grow; }
-  void set_key(const std::array<uint8_t, PSK_SIZE> &key) { this->psk_ = key; }
+  void set_key(const std::array<uint8_t, PSK_SIZE> &key) {
+    this->psk_ = key;
+    this->network_ = true;
+  }
   void set_port(uint16_t port) { this->transport_.set_port(port); }
   void set_sensor_address(uint32_t address) { this->link_.set_address(address); }
   void add_peer(const char *host, uint16_t port) { this->peers_.push_back(Peer{host, port}); }
@@ -316,6 +319,7 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   // ---- configuration ----
   fingerprint_grow::FingerprintGrowComponent *grow_{nullptr};
   std::array<uint8_t, PSK_SIZE> psk_{};
+  bool network_{false};  // false: stand-alone, no listener, no peers
   std::vector<Peer> peers_;
   std::vector<SlotRange> include_;
   std::vector<SlotRange> exclude_;
@@ -437,4 +441,4 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   CallbackManager<void(std::string, uint16_t)> admin_done_cb_;
 };
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

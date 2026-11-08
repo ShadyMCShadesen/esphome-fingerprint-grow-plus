@@ -1,15 +1,15 @@
 // Admin fingers (gestures, protected slots) and guest fingers with an expiry date.
 
-#include "fingerprint_sync.h"
+#include "fingerprint_grow_plus.h"
 
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
 #include <cinttypes>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
-static const char *const TAG = "fingerprint_sync.admin";
+static const char *const TAG = "fingerprint_grow_plus.admin";
 static constexpr uint32_t EXPIRY_CHECK_INTERVAL_MS = 30000;
 static constexpr size_t EXPIRY_PREF_CHUNK = 64;
 
@@ -30,7 +30,7 @@ static const char *arm_name(AdminArm arm) {
 // Admin slots
 // ---------------------------------------------------------------------------------------------
 
-bool FingerprintSyncComponent::is_admin_slot(uint16_t slot) const {
+bool FingerprintGrowPlusComponent::is_admin_slot(uint16_t slot) const {
   for (uint16_t s : this->admin_slots_) {
     if (s == slot)
       return true;
@@ -38,11 +38,11 @@ bool FingerprintSyncComponent::is_admin_slot(uint16_t slot) const {
   return false;
 }
 
-bool FingerprintSyncComponent::is_admin_busy() const {
+bool FingerprintGrowPlusComponent::is_admin_busy() const {
   return this->admin_hits_ > 0 || this->armed_ != AdminArm::NONE;
 }
 
-uint8_t FingerprintSyncComponent::health() const {
+uint8_t FingerprintGrowPlusComponent::health() const {
   if (this->failed_sensor_ || !this->last_round_ok_)
     return 3;
   if (this->conflict_count() > 0)
@@ -56,7 +56,7 @@ uint8_t FingerprintSyncComponent::health() const {
 // Gestures
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintSyncComponent::on_matched_(uint16_t finger_id) {
+void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id) {
   const uint32_t now = millis();
   this->last_activity_ms_ = now;
   if (!this->admin_enabled_)
@@ -88,7 +88,7 @@ void FingerprintSyncComponent::on_matched_(uint16_t finger_id) {
   this->admin_touch_cb_.call(this->admin_hits_);
 }
 
-void FingerprintSyncComponent::admin_loop_() {
+void FingerprintGrowPlusComponent::admin_loop_() {
   const uint32_t now = millis();
   if (this->armed_ != AdminArm::NONE && (int32_t) (now - this->armed_until_ms_) >= 0) {
     ESP_LOGI(TAG, "No finger presented in time: %s action cancelled", arm_name(this->armed_));
@@ -121,7 +121,7 @@ void FingerprintSyncComponent::admin_loop_() {
   this->run_gesture_(touches);
 }
 
-void FingerprintSyncComponent::run_gesture_(uint8_t touches) {
+void FingerprintGrowPlusComponent::run_gesture_(uint8_t touches) {
   ESP_LOGI(TAG, "Admin gesture: %u touch(es)", touches);
   this->admin_gesture_cb_.call(touches);
   if (touches == this->enroll_touches_) {
@@ -135,7 +135,7 @@ void FingerprintSyncComponent::run_gesture_(uint8_t touches) {
   }
 }
 
-void FingerprintSyncComponent::arm_(AdminArm action) {
+void FingerprintGrowPlusComponent::arm_(AdminArm action) {
   if (!this->indexed_once_) {
     ESP_LOGW(TAG, "Admin action refused: index not ready yet");
     return;
@@ -146,10 +146,10 @@ void FingerprintSyncComponent::arm_(AdminArm action) {
   this->admin_waiting_cb_.call(std::string(arm_name(action)));
 }
 
-void FingerprintSyncComponent::delete_next_finger() { this->arm_(AdminArm::DELETE); }
-void FingerprintSyncComponent::reenroll_next_finger() { this->arm_(AdminArm::REENROLL); }
+void FingerprintGrowPlusComponent::delete_next_finger() { this->arm_(AdminArm::DELETE); }
+void FingerprintGrowPlusComponent::reenroll_next_finger() { this->arm_(AdminArm::REENROLL); }
 
-void FingerprintSyncComponent::cancel_admin() {
+void FingerprintGrowPlusComponent::cancel_admin() {
   if (this->armed_ == AdminArm::NONE && this->admin_hits_ == 0)
     return;
   this->armed_ = AdminArm::NONE;
@@ -157,7 +157,7 @@ void FingerprintSyncComponent::cancel_admin() {
   this->admin_cancelled_cb_.call();
 }
 
-void FingerprintSyncComponent::run_armed_(uint16_t slot) {
+void FingerprintGrowPlusComponent::run_armed_(uint16_t slot) {
   const AdminArm action = this->armed_;
   this->armed_ = AdminArm::NONE;
   if (action == AdminArm::DELETE) {
@@ -176,9 +176,9 @@ void FingerprintSyncComponent::run_armed_(uint16_t slot) {
   this->admin_done_cb_.call(std::string(arm_name(action)), slot);
 }
 
-void FingerprintSyncComponent::delete_admin(uint16_t slot, const std::string &code) {
+void FingerprintGrowPlusComponent::delete_admin(uint16_t slot, const std::string &code) {
   if (!this->is_admin_slot(slot)) {
-    ESP_LOGW(TAG, "delete_admin: slot %u is not an admin slot; use fingerprint_sync.delete", slot);
+    ESP_LOGW(TAG, "delete_admin: slot %u is not an admin slot; use fingerprint_grow_plus.delete", slot);
     return;
   }
   if (this->delete_all_code_ == nullptr || this->delete_all_code_[0] == '\0' || code != this->delete_all_code_) {
@@ -199,7 +199,7 @@ void FingerprintSyncComponent::delete_admin(uint16_t slot, const std::string &co
 // Guests
 // ---------------------------------------------------------------------------------------------
 
-bool FingerprintSyncComponent::time_now_(uint32_t &epoch) const {
+bool FingerprintGrowPlusComponent::time_now_(uint32_t &epoch) const {
 #ifdef USE_TIME
   if (this->time_ != nullptr) {
     auto t = this->time_->now();
@@ -212,7 +212,7 @@ bool FingerprintSyncComponent::time_now_(uint32_t &epoch) const {
   return false;
 }
 
-void FingerprintSyncComponent::enroll_guest(uint8_t num_scans, uint32_t valid_s) {
+void FingerprintGrowPlusComponent::enroll_guest(uint8_t num_scans, uint32_t valid_s) {
   if (!this->guests_enabled_) {
     ESP_LOGW(TAG, "Guest enrollment refused: no guest slots configured");
     return;
@@ -238,7 +238,7 @@ void FingerprintSyncComponent::enroll_guest(uint8_t num_scans, uint32_t valid_s)
   this->grow_->enroll_fingerprint((uint16_t) slot, num_scans);
 }
 
-void FingerprintSyncComponent::extend_guest(uint16_t slot, uint32_t valid_s) {
+void FingerprintGrowPlusComponent::extend_guest(uint16_t slot, uint32_t valid_s) {
   uint32_t now;
   if (!this->params_loaded_ || slot >= this->capacity_ || !meta_present(this->meta_[slot]) ||
       this->expires_[slot] == 0) {
@@ -257,14 +257,14 @@ void FingerprintSyncComponent::extend_guest(uint16_t slot, uint32_t valid_s) {
   this->request_round_(2000);
 }
 
-void FingerprintSyncComponent::set_expiry_(uint16_t slot, uint32_t expires) {
+void FingerprintGrowPlusComponent::set_expiry_(uint16_t slot, uint32_t expires) {
   if (slot < this->expires_.size() && this->expires_[slot] != expires) {
     this->expires_[slot] = expires;
     this->mark_dirty_();
   }
 }
 
-void FingerprintSyncComponent::guest_expiry_loop_() {
+void FingerprintGrowPlusComponent::guest_expiry_loop_() {
   const uint32_t now_ms = millis();
   if (!this->indexed_once_ || !elapsed(now_ms, this->last_expiry_check_ms_, EXPIRY_CHECK_INTERVAL_MS))
     return;
@@ -285,7 +285,7 @@ void FingerprintSyncComponent::guest_expiry_loop_() {
   }
 }
 
-int32_t FingerprintSyncComponent::next_free_in_(uint16_t from, uint16_t to, bool guests_allowed) const {
+int32_t FingerprintGrowPlusComponent::next_free_in_(uint16_t from, uint16_t to, bool guests_allowed) const {
   if (!this->params_loaded_ || this->capacity_ == 0)
     return -1;
   to = std::min<uint16_t>(to, this->capacity_ - 1);
@@ -305,7 +305,7 @@ int32_t FingerprintSyncComponent::next_free_in_(uint16_t from, uint16_t to, bool
 // Expiry persistence (preferences backend only; the notepad has no room for it)
 // ---------------------------------------------------------------------------------------------
 
-void FingerprintSyncComponent::load_expiries_() {
+void FingerprintGrowPlusComponent::load_expiries_() {
   this->expires_.assign(this->capacity_, 0);
   if (this->backend_ != MetaBackend::PREFERENCES)
     return;
@@ -322,7 +322,7 @@ void FingerprintSyncComponent::load_expiries_() {
   }
 }
 
-void FingerprintSyncComponent::save_expiries_() {
+void FingerprintGrowPlusComponent::save_expiries_() {
   for (size_t c = 0; c < this->expiry_prefs_.size(); c++) {
     std::array<uint32_t, EXPIRY_PREF_CHUNK> chunk{};
     for (size_t i = 0; i < EXPIRY_PREF_CHUNK && c * EXPIRY_PREF_CHUNK + i < this->capacity_; i++)
@@ -331,4 +331,4 @@ void FingerprintSyncComponent::save_expiries_() {
   }
 }
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus

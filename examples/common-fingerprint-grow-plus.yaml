@@ -1,4 +1,4 @@
-# Shared part of the examples: fingerprint_sync plus the three enrollment methods
+# Shared part of the examples: fingerprint_grow_plus plus the three enrollment methods
 # that work without Home Assistant (physical button, web UI, admin finger).
 # Include it with `packages:` and provide the substitutions listed below.
 #
@@ -17,18 +17,18 @@ fingerprint_grow:
         condition:
           not:
             or:
-              - fingerprint_sync.is_admin_slot: !lambda return finger_id;
-              - fingerprint_sync.is_admin_busy:
+              - fingerprint_grow_plus.is_admin_slot: !lambda return finger_id;
+              - fingerprint_grow_plus.is_admin_busy:
         then:
           - logger.log:
               format: "finger %u matched - your door/gate action goes here"
               args: [finger_id]
 
-fingerprint_sync:
-  id: fp_sync
+fingerprint_grow_plus:
+  id: fp_plus
   fingerprint_grow_id: grow
   uart_id: uart_sensor
-  key: !secret fingerprint_sync_key
+  key: !secret fingerprint_grow_plus_key
   # All nodes in one list; the node skips itself automatically.
   peers:
     - reader-garden.local
@@ -58,7 +58,7 @@ fingerprint_sync:
     # Status colour: green = in sync, blue = syncing, yellow = conflict, red = error.
     - lambda: |-
         static const uint8_t colors[] = {4, 2, 5, 1};
-        id(grow).aura_led_control(2, 50, colors[id(fp_sync).health()], 5);
+        id(grow).aura_led_control(2, 50, colors[id(fp_plus).health()], 5);
   on_admin_waiting:
     - logger.log:
         format: "show the finger to %s"
@@ -111,9 +111,9 @@ binary_sensor:
     filters:
       - delayed_on: 50ms
     on_press:
-      - fingerprint_sync.enroll_next_free:
+      - fingerprint_grow_plus.enroll_next_free:
           num_scans: 3
-  - platform: fingerprint_sync
+  - platform: fingerprint_grow_plus
     syncing:
       name: Fingerprint sync running
 
@@ -125,7 +125,7 @@ sensor:
     capacity:
       id: fingerprint_capacity
       name: Fingerprint capacity
-  - platform: fingerprint_sync
+  - platform: fingerprint_grow_plus
     peers_reachable:
       name: Fingerprint sync peers reachable
     error_count:
@@ -134,7 +134,7 @@ sensor:
       name: Fingerprint sync conflicts
 
 text_sensor:
-  - platform: fingerprint_sync
+  - platform: fingerprint_grow_plus
     status:
       name: Fingerprint sync status
 
@@ -153,7 +153,7 @@ button:
   - platform: template
     name: Enroll next free slot
     on_press:
-      - fingerprint_sync.enroll_next_free: 3
+      - fingerprint_grow_plus.enroll_next_free: 3
   - platform: template
     name: Enroll selected slot
     on_press:
@@ -163,16 +163,16 @@ button:
   - platform: template
     name: Delete selected slot on all nodes
     on_press:
-      - fingerprint_sync.delete: !lambda "return (uint16_t) id(enroll_slot).state;"
+      - fingerprint_grow_plus.delete: !lambda "return (uint16_t) id(enroll_slot).state;"
   - platform: template
     name: Sync fingerprints now
     on_press:
-      - fingerprint_sync.sync
+      - fingerprint_grow_plus.sync
   - platform: template
     name: Allow restore for 5 minutes
     entity_category: config
     on_press:
-      - fingerprint_sync.allow_restore: 5min
+      - fingerprint_grow_plus.allow_restore: 5min
 
 time:
   - platform: sntp

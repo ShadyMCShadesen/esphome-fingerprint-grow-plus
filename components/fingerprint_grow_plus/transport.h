@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace esphome::fingerprint_sync {
+namespace esphome::fingerprint_grow_plus {
 
 class Stream {
  public:
@@ -38,4 +38,4 @@ class Transport {
   virtual void dump_config() = 0;
 };
 
-}  // namespace esphome::fingerprint_sync
+}  // namespace esphome::fingerprint_grow_plus
