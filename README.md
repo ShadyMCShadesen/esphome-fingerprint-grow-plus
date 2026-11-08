@@ -117,7 +117,8 @@ fingerprint_sync:
 | 5 touches (only with `guests:`) | enroll a guest finger |
 | hold ≥ 3 s (needs `finger_sensor`) | `on_admin_hold`: show the status, see `health()` |
 
-- **Gestures**: a gesture is complete after a pause of `window` (2 s). Showing an admin finger
+- **Gestures**: a gesture is complete when no finger has been on the sensor for `window` (2 s;
+  measured from the last match without `finger_sensor`, so configure it). Showing an admin finger
   instead of the target finger, or no finger within `target_timeout` (10 s), cancels the action.
 - **Protection**: admin slots are never a free slot, never a gesture target, refused by
   `fingerprint_sync.delete` and kept by `delete_all`. Only `fingerprint_sync.delete_admin` with
@@ -219,7 +220,7 @@ fingerprint_sync:
     delete_touches: 3
     reenroll_touches: 4
     guest_touches: 5                  # default 5 with guests:, otherwise 0
-    window: 2s                        # pause that completes a gesture
+    window: 2s                        # pause after lifting that completes a gesture
     hold_time: 3s
     target_timeout: 10s
     num_scans: 3

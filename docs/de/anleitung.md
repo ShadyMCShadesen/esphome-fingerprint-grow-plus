@@ -75,7 +75,8 @@ gewollt, denn es wird nie geraten.
 ## Admin-Finger
 
 Admin-Finger (`admin: slots: [0, 1]`) öffnen nichts, sie bedienen nur den Sync. Eine Geste ist
-eine Anzahl Berührungen, abgeschlossen durch eine kurze Pause:
+eine Anzahl Berührungen, abgeschlossen durch eine Pause von 2 s ohne Finger auf dem Sensor
+(dafür `finger_sensor` konfigurieren):
 
 | Geste | Wirkung |
 |---|---|

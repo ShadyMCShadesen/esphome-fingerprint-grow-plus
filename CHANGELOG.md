@@ -17,6 +17,9 @@ versioning: [Semantic Versioning](https://semver.org/).
   synced and enforced by every node with a valid time.
 
 ### Fixed
+- Admin gestures on real sensors: the pause that completes a gesture now starts when the finger
+  is lifted (with `finger_sensor`), not at the match. Matching the next touch takes 1.5-3 s on an
+  R503, so two touches were often counted as two single touches and nothing happened.
 - `enroll_next_free`, `claim_all_slots`, admin gestures and guest expiry no longer wait for a
   finished sync round after boot; one complete local index is enough.
 - Peer slot knowledge is kept between rounds, so an unreachable peer no longer makes its slots

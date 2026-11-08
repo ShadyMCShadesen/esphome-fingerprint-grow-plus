@@ -390,7 +390,8 @@ class FingerprintSyncComponent : public Component, public uart::UARTDevice {
   uint32_t last_activity_ms_{0};
   uint32_t retry_ms_{0};
   uint8_t admin_hits_{0};
-  uint32_t admin_last_ms_{0};
+  uint32_t admin_last_ms_{0};        // last admin match (hold detection)
+  uint32_t admin_quiet_since_ms_{0};  // last admin match or last moment a finger was on the sensor
   bool admin_hold_possible_{false};
   AdminArm armed_{AdminArm::NONE};
   uint32_t armed_until_ms_{0};

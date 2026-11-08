@@ -77,10 +77,11 @@ void FingerprintSyncComponent::on_matched_(uint16_t finger_id) {
   if (!admin)
     return;
 
-  if (this->admin_hits_ > 0 && elapsed(now, this->admin_last_ms_, this->gesture_timeout_ms_))
+  if (this->admin_hits_ > 0 && elapsed(now, this->admin_quiet_since_ms_, this->gesture_timeout_ms_))
     this->admin_hits_ = 0;
   this->admin_hits_++;
   this->admin_last_ms_ = now;
+  this->admin_quiet_since_ms_ = now;
   // A hold is only possible on the first touch and needs a finger sensor to see the finger.
   this->admin_hold_possible_ = this->admin_hits_ == 1 && this->hold_ms_ > 0 && this->finger_sensor_ != nullptr;
   ESP_LOGD(TAG, "Admin finger (slot %u), touch %u", finger_id, this->admin_hits_);
@@ -98,6 +99,11 @@ void FingerprintSyncComponent::admin_loop_() {
     return;
 
   const bool finger_on = this->finger_sensor_ != nullptr && this->finger_sensor_->state;
+  // The pause that completes a gesture starts when the finger is lifted, not at the match: on real
+  // sensors the next touch is matched 1.5-3 s after the previous match (lift, touch, image, search),
+  // and a finger lying on the sensor keeps the gesture open until the sensor reports the match.
+  if (finger_on)
+    this->admin_quiet_since_ms_ = now;
   if (this->admin_hold_possible_ && finger_on) {
     if (elapsed(now, this->admin_last_ms_, this->hold_ms_)) {
       this->admin_hits_ = 0;
@@ -107,10 +113,8 @@ void FingerprintSyncComponent::admin_loop_() {
     }
     return;  // still deciding between a hold and a single touch
   }
-  if (!elapsed(now, this->admin_last_ms_, this->gesture_timeout_ms_))
+  if (finger_on || !elapsed(now, this->admin_quiet_since_ms_, this->gesture_timeout_ms_))
     return;
-  if (finger_on)
-    return;  // wait until the finger is lifted before closing the gesture
   uint8_t touches = this->admin_hits_;
   this->admin_hits_ = 0;
   this->admin_hold_possible_ = false;
