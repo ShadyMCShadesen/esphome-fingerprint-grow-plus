@@ -27,6 +27,35 @@ static constexpr uint8_t CMD_READ_NOTEPAD = 0x19;
 static constexpr uint8_t CMD_TEMPLATE_NUM = 0x1D;
 static constexpr uint8_t CMD_READ_INDEX_TABLE = 0x1F;
 
+static const char *command_name(uint8_t cmd) {
+  switch (cmd) {
+    case CMD_MATCH:
+      return "Match";
+    case CMD_STORE:
+      return "Store";
+    case CMD_LOAD_CHAR:
+      return "LoadChar";
+    case CMD_UP_CHAR:
+      return "UpChar";
+    case CMD_DOWN_CHAR:
+      return "DownChar";
+    case CMD_DELETE_CHAR:
+      return "DeletChar";
+    case CMD_READ_SYS_PARA:
+      return "ReadSysPara";
+    case CMD_WRITE_NOTEPAD:
+      return "WriteNotepad";
+    case CMD_READ_NOTEPAD:
+      return "ReadNotepad";
+    case CMD_TEMPLATE_NUM:
+      return "TempleteNum";
+    case CMD_READ_INDEX_TABLE:
+      return "ReadIndexTable";
+    default:
+      return "command";
+  }
+}
+
 void GrowLink::drain_() {
   uint8_t byte;
   while (this->uart_->available() > 0)
@@ -64,11 +93,13 @@ bool GrowLink::read_byte_(uint8_t &byte, uint32_t deadline) {
     delayMicroseconds(100);
   }
   this->uart_->read_byte(&byte);
+  this->last_rx_bytes_++;
   return true;
 }
 
 uint8_t GrowLink::receive_packet_(uint8_t &pid, std::vector<uint8_t> &payload, uint32_t timeout_ms) {
   const uint32_t deadline = millis() + timeout_ms;
+  this->last_rx_bytes_ = 0;
   const uint8_t expected[6] = {0xEF,
                                0x01,
                                (uint8_t) (this->address_ >> 24),
@@ -115,6 +146,7 @@ uint8_t GrowLink::receive_packet_(uint8_t &pid, std::vector<uint8_t> &payload, u
 uint8_t GrowLink::command_(const uint8_t *cmd, size_t len, std::vector<uint8_t> &ack, uint32_t timeout_ms) {
   if (this->uart_ == nullptr)
     return GROW_TIMEOUT;
+  this->last_step_ = command_name(cmd[0]);
   this->drain_();
   this->send_packet_(PID_COMMAND, cmd, len);
   uint8_t pid;
@@ -184,6 +216,7 @@ uint8_t GrowLink::up_char(uint8_t buffer, std::vector<uint8_t> &out) {
   uint8_t res = this->command_(cmd, sizeof(cmd), ack);
   if (res != GROW_OK)
     return res;
+  this->last_step_ = "UpChar data";
   out.clear();
   out.reserve(1024);
   std::vector<uint8_t> payload;
@@ -206,6 +239,7 @@ uint8_t GrowLink::up_char(uint8_t buffer, std::vector<uint8_t> &out) {
   }
   if (!payload.empty())
     memset(payload.data(), 0, payload.size());
+  this->last_template_size_ = out.size();
   if (res != GROW_OK) {
     if (!out.empty())
       memset(out.data(), 0, out.size());
@@ -222,6 +256,8 @@ uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data) {
   uint8_t res = this->command_(cmd, sizeof(cmd), ack);
   if (res != GROW_OK)
     return res;
+  this->last_step_ = "DownChar data";
+  this->last_template_size_ = data.size();
   size_t pos = 0;
   const size_t chunk = this->packet_size_;
   while (pos < data.size()) {

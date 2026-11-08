@@ -73,6 +73,12 @@ class GrowLink {
   uint16_t packet_size() const { return this->packet_size_; }
   /// Sum of all bytes moved since boot (diagnostics only).
   uint32_t bytes_moved() const { return this->bytes_moved_; }
+  /// Diagnostics for the most recent failure: the step that failed and how many bytes of the
+  /// (incomplete) answer had arrived. 0 bytes means the module did not answer at all.
+  const char *last_step() const { return this->last_step_; }
+  size_t last_rx_bytes() const { return this->last_rx_bytes_; }
+  /// Size of the last template moved by UpChar/DownChar (no content, diagnostics only).
+  size_t last_template_size() const { return this->last_template_size_; }
 
  protected:
   void drain_();
@@ -87,6 +93,9 @@ class GrowLink {
   uint32_t address_{0xFFFFFFFF};
   uint16_t packet_size_{128};
   uint32_t bytes_moved_{0};
+  const char *last_step_{""};
+  size_t last_rx_bytes_{0};
+  size_t last_template_size_{0};
 };
 
 }  // namespace esphome::fingerprint_sync

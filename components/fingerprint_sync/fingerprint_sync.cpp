@@ -390,7 +390,8 @@ void FingerprintSyncComponent::job_hash_(Job &job) {
   std::vector<uint8_t> data;
   uint8_t res = this->link_.read_template(slot, data);
   if (res != GROW_OK) {
-    ESP_LOGW(TAG, "Reading template of slot %u failed (0x%02X)", slot, res);
+    ESP_LOGW(TAG, "Reading template of slot %u failed at %s (0x%02X, %u answer bytes)", slot, this->link_.last_step(),
+             res, (unsigned) this->link_.last_rx_bytes());
     this->error_count_++;
     this->publish_diagnostics_();
     this->finish_indexing_if_done_();
@@ -398,6 +399,7 @@ void FingerprintSyncComponent::job_hash_(Job &job) {
   }
   uint8_t digest[32];
   crypto::sha256(data.data(), data.size(), digest);
+  ESP_LOGD(TAG, "Slot %u indexed (template %u bytes)", slot, (unsigned) data.size());
   crypto::wipe(data.data(), data.size());
   memcpy(this->hash_[slot].data(), digest, HASH_SIZE);
   this->hash_known_[slot] = true;
@@ -461,7 +463,8 @@ bool FingerprintSyncComponent::store_verified_(uint8_t buffer, uint16_t slot, co
   // Precondition: CharBuffer `buffer` holds `data`.
   uint8_t res = this->link_.store(buffer, slot);
   if (res != GROW_OK) {
-    ESP_LOGE(TAG, "Storing slot %u failed (0x%02X)", slot, res);
+    ESP_LOGE(TAG, "Storing slot %u failed at %s (0x%02X, %u answer bytes)", slot, this->link_.last_step(), res,
+             (unsigned) this->link_.last_rx_bytes());
     return false;
   }
   // Verification: read back and compare. If the module re-encodes the template, fall back to
@@ -517,7 +520,8 @@ void FingerprintSyncComponent::job_write_(Job &job) {
   uint8_t res = this->link_.down_char(1, job.data);
   bool ok = res == GROW_OK && this->store_verified_(1, slot, job.data);
   if (res != GROW_OK)
-    ESP_LOGE(TAG, "Downloading template for slot %u failed (0x%02X)", slot, res);
+    ESP_LOGE(TAG, "Downloading template for slot %u failed at %s (0x%02X, %u answer bytes, template %u bytes)", slot,
+             this->link_.last_step(), res, (unsigned) this->link_.last_rx_bytes(), (unsigned) job.data.size());
 
   uint16_t meta = job.meta;
   if (restore) {
@@ -567,7 +571,9 @@ void FingerprintSyncComponent::job_compare_(Job &job) {
     return;
   }
   if (res != GROW_OK) {
-    ESP_LOGW(TAG, "Comparing slot %u failed (0x%02X)", slot, res);
+    ESP_LOGW(TAG, "Comparing slot %u failed at %s (0x%02X, %u answer bytes, template %u bytes, packet size %u)",
+             slot, this->link_.last_step(), res, (unsigned) this->link_.last_rx_bytes(), (unsigned) job.data.size(),
+             this->link_.packet_size());
     this->error_count_++;
     this->publish_diagnostics_();
     return;
