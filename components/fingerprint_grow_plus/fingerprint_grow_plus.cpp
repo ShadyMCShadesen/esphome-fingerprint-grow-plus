@@ -129,7 +129,13 @@ void FingerprintGrowPlusComponent::dump_config() {
     ESP_LOGCONFIG(TAG, "    Synced slots: %u-%u", r.from, r.to);
   for (const auto &r : this->exclude_)
     ESP_LOGCONFIG(TAG, "    Not synced: %u-%u", r.from, r.to);
-  ESP_LOGCONFIG(TAG, "    Interval: %" PRIu32 " s", this->sync_interval_ms_ / 1000);
+  if (this->sync_interval_ms_ == 0) {
+    ESP_LOGCONFIG(TAG, "    Interval: never (manual sync only)");
+  } else {
+    ESP_LOGCONFIG(TAG, "    Interval: %" PRIu32 " s", this->sync_interval_ms_ / 1000);
+  }
+  ESP_LOGCONFIG(TAG, "    Sync at boot: %s, after local changes: %s", YESNO(this->sync_at_boot_),
+                YESNO(this->sync_after_change_));
   if (this->dry_run_)
     ESP_LOGCONFIG(TAG, "    DRY RUN: the sync writes and deletes nothing on this sensor");
 }
@@ -169,6 +175,16 @@ void FingerprintGrowPlusComponent::mark_dirty_() {
   if (!this->meta_dirty_)
     this->meta_dirty_ms_ = millis();
   this->meta_dirty_ = true;
+}
+
+void FingerprintGrowPlusComponent::request_change_round_(uint32_t delay_ms) {
+  if (this->sync_after_change_)
+    this->request_round_(delay_ms);
+}
+
+void FingerprintGrowPlusComponent::request_periodic_round_() {
+  if (this->sync_interval_ms_ != 0)
+    this->request_round_(this->sync_interval_ms_);
 }
 
 void FingerprintGrowPlusComponent::request_round_(uint32_t delay_ms) {
@@ -378,7 +394,7 @@ void FingerprintGrowPlusComponent::finish_indexing_if_done_() {
   ESP_LOGI(TAG, "Index ready: %u templates (%u synced), capacity %u, clock %u", present, synced, this->capacity_,
            this->clock_);
   this->set_status_(this->dry_run_ ? "idle (dry run)" : "idle");
-  if (!this->round_requested_)
+  if (!this->round_requested_ && this->sync_at_boot_)
     this->request_round_(1000);
 }
 
@@ -546,7 +562,7 @@ void FingerprintGrowPlusComponent::job_hash_(Job &job) {
     ESP_LOGI(TAG, "Slot %u enrolled (version %u%s), propagating", slot, meta_version(this->meta_[slot]),
              was_present ? ", replaces previous finger" : "");
     if (job.flags & JOB_FLAG_PROPAGATE)
-      this->request_round_(PUSH_DELAY_MS);
+      this->request_change_round_(PUSH_DELAY_MS);
   }
   this->finish_indexing_if_done_();
 }
@@ -683,7 +699,7 @@ void FingerprintGrowPlusComponent::job_write_(Job &job) {
     if (s != nullptr)
       s->pulled++;
     if (restore)
-      this->request_round_(PUSH_DELAY_MS);
+      this->request_change_round_(PUSH_DELAY_MS);
   } else {
     this->error_count_++;
     this->local_present_[slot] = false;
@@ -746,7 +762,7 @@ void FingerprintGrowPlusComponent::job_delete_(Job &job) {
   }
   this->slot_deleted_cb_.call(slot);
   if (job.flags & JOB_FLAG_PROPAGATE)
-    this->request_round_(PUSH_DELAY_MS);
+    this->request_change_round_(PUSH_DELAY_MS);
 }
 
 void FingerprintGrowPlusComponent::job_count_() {
@@ -771,7 +787,7 @@ void FingerprintGrowPlusComponent::claim_all_slots() {
   this->mark_dirty_();
   ESP_LOGW(TAG, "This node claims %u slot(s): peers replace their templates in these slots with this node's", n);
   this->publish_diagnostics_();
-  this->request_round_(PUSH_DELAY_MS);
+  this->request_change_round_(PUSH_DELAY_MS);
 }
 
 void FingerprintGrowPlusComponent::resolve_all_conflicts(bool keep_local) {
@@ -860,7 +876,7 @@ void FingerprintGrowPlusComponent::delete_all(const std::string &code) {
     queued++;
   }
   ESP_LOGI(TAG, "%u deletions queued", queued);
-  this->request_round_(PUSH_DELAY_MS + 1000u * queued);
+  this->request_change_round_(PUSH_DELAY_MS + 1000u * queued);
 }
 
 int32_t FingerprintGrowPlusComponent::next_free_slot() const {
@@ -900,7 +916,7 @@ void FingerprintGrowPlusComponent::resolve_conflict(uint16_t slot, bool keep_loc
     this->conflict_[slot] = false;
     this->mark_dirty_();
     ESP_LOGI(TAG, "Slot %u: keeping this node's finger; peers will replace theirs", slot);
-    this->request_round_(PUSH_DELAY_MS);
+    this->request_change_round_(PUSH_DELAY_MS);
   } else {
     // Drop the local template without a tombstone; the next round fetches the peer's finger.
     Job job;
@@ -1538,7 +1554,7 @@ void FingerprintGrowPlusComponent::run_round_() {
         this->set_status_("sensor busy");
         this->publish_diagnostics_();
         if (!this->round_requested_)
-          this->request_round_(this->sync_interval_ms_);
+          this->request_periodic_round_();
       }
       return;
     }
@@ -1581,7 +1597,7 @@ void FingerprintGrowPlusComponent::run_round_() {
   this->set_status_(this->dry_run_ ? "idle (dry run)" : (this->round_failures_ ? "idle (last round had errors)" : "idle"));
   this->publish_diagnostics_();
   if (!this->round_requested_)
-    this->request_round_(this->sync_interval_ms_);
+    this->request_periodic_round_();
 }
 
 void FingerprintGrowPlusComponent::loop() {

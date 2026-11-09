@@ -265,7 +265,7 @@ void FingerprintGrowPlusComponent::extend_guest(uint16_t slot, uint32_t valid_s)
   this->set_expiry_(slot, now + valid_s);
   this->mark_dirty_();
   ESP_LOGI(TAG, "Guest slot %u now valid for %" PRIu32 " h", slot, valid_s / 3600);
-  this->request_round_(2000);
+  this->request_change_round_(2000);
 }
 
 void FingerprintGrowPlusComponent::set_expiry_(uint16_t slot, uint32_t expires) {

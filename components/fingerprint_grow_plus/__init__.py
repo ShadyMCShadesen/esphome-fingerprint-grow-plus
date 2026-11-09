@@ -50,6 +50,8 @@ CONF_INCLUDE_SLOTS = "include_slots"
 CONF_EXCLUDE_SLOTS = "exclude_slots"
 CONF_INTERVAL = "interval"
 CONF_DRY_RUN = "dry_run"
+CONF_AT_BOOT = "at_boot"
+CONF_AFTER_CHANGE = "after_change"
 CONF_ON_SYNC_STARTED = "on_started"
 CONF_ON_SYNC_DONE = "on_done"
 CONF_ON_SYNC_FAILED = "on_failed"
@@ -160,7 +162,13 @@ SYNC_SCHEMA = cv.Schema(
         # Synced slots (default: all) minus excluded ones. Local features use all slots.
         cv.Optional(CONF_INCLUDE_SLOTS, default=[]): cv.ensure_list(validate_slot_range),
         cv.Optional(CONF_EXCLUDE_SLOTS, default=[]): cv.ensure_list(validate_slot_range),
-        cv.Optional(CONF_INTERVAL, default="15min"): cv.positive_time_period_milliseconds,
+        # Periodic full comparison with all peers, or "never" (manual sync only).
+        cv.Optional(CONF_INTERVAL, default="15min"): cv.Any(
+            cv.one_of("never", lower=True), cv.positive_time_period_milliseconds
+        ),
+        # Sync shortly after boot / ~2 s after a local change (enroll, delete, restore, ...).
+        cv.Optional(CONF_AT_BOOT, default=True): cv.boolean,
+        cv.Optional(CONF_AFTER_CHANGE, default=True): cv.boolean,
         cv.Optional(CONF_DRY_RUN, default=False): cv.boolean,
         cv.Optional(CONF_ON_SYNC_STARTED): automation.validate_automation({}),
         cv.Optional(CONF_ON_SYNC_DONE): automation.validate_automation({}),
@@ -413,7 +421,10 @@ async def to_code(config):
             cg.add(var.add_include_range(low, high))
         for low, high in sync[CONF_EXCLUDE_SLOTS]:
             cg.add(var.add_exclude_range(low, high))
-        cg.add(var.set_sync_interval(sync[CONF_INTERVAL]))
+        interval = sync[CONF_INTERVAL]
+        cg.add(var.set_sync_interval(0 if interval == "never" else interval))
+        cg.add(var.set_sync_at_boot(sync[CONF_AT_BOOT]))
+        cg.add(var.set_sync_after_change(sync[CONF_AFTER_CHANGE]))
         cg.add(var.set_dry_run(sync[CONF_DRY_RUN]))
         await automation.build_callback_automations(var, sync, _SYNC_AUTOMATIONS)
 

@@ -183,8 +183,12 @@ fingerprint_grow_plus:
 - **Deleting with `fingerprint_grow_plus.delete`** (or the 3-touch gesture) deletes on all nodes.
   A finger that is merely missing on one node (new sensor, local delete with
   `fingerprint_grow.delete`) is copied back from the others.
-- **Offline nodes catch up** when they come back; every 15 min (`interval`) and after every
-  change the nodes compare their slot lists.
+- **When it syncs**: after boot (`at_boot`), about 2 s after a local change such as an enrollment
+  or deletion (`after_change`), every 15 min (`interval`), and on `fingerprint_grow_plus.sync`.
+  Offline nodes catch up when they come back. `interval: never`, `at_boot: false` and
+  `after_change: false` switch the automatic syncs off, so changes then wait for the next manual
+  sync. Without regular syncs `enroll_next_free` may not know which slots the others use and can
+  pick one that is taken elsewhere (reported as a conflict).
 - **Only some slots**: `include_slots` / `exclude_slots` decide what is synced. Slots outside stay
   on the node; admin gestures, guests and `delete_all` still work there. Example: a node at
   another site that shares only the admin finger:
@@ -291,7 +295,9 @@ fingerprint_grow_plus:
     allowed_networks: [192.168.10.0/24]   # accept peers only from these networks
     include_slots: ["0-199"]          # synced slots (default: all)
     exclude_slots: []                 # never synced
-    interval: 15min                   # full comparison with all peers
+    interval: 15min                   # periodic full comparison with all peers, or never
+    at_boot: true                     # sync shortly after boot
+    after_change: true                # sync ~2 s after a local change (enroll, delete, restore, …)
     dry_run: false                    # true: only log what the sync would write or delete
     on_started: []
     on_done: []                       # round finished without errors

@@ -164,8 +164,21 @@ Geräten.
       include_slots: ["99"]
   ```
 
-- Ausgefallene Geräte holen alles nach, sobald sie wieder da sind; verglichen wird nach jeder
-  Änderung und alle 15 min (`interval`).
+- **Wann synchronisiert wird:** nach dem Booten (`at_boot`), etwa 2 s nach einer eigenen Änderung
+  wie Einlernen oder Löschen (`after_change`), alle 15 min (`interval`) und bei
+  `fingerprint_grow_plus.sync`. Ausgefallene Geräte holen alles nach, sobald sie wieder da sind.
+- **Automatischen Sync abschalten:**
+
+  ```yaml
+  sync:
+    interval: never      # kein regelmäßiger Abgleich
+    at_boot: false       # nicht nach dem Booten
+    after_change: false  # nicht nach Einlernen, Löschen, …
+  ```
+
+  Änderungen warten dann auf den nächsten manuellen Sync. Ohne regelmäßigen Abgleich weiß
+  `enroll_next_free` nicht sicher, welche Plätze die anderen belegt haben, und kann einen dort
+  belegten Platz wählen (das wird dann als Konflikt gemeldet).
 - Das Sensor-Passwort wird nie gesetzt oder geändert.
 
 ### Erstinbetriebnahme mit bereits eingelernten Fingern

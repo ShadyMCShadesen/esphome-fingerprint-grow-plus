@@ -37,7 +37,9 @@ End-to-end scenarios:
     enrolls into a local slot with the admin gesture and reports `occupied_slots`. A default backup
     holds only the synced slot, `--include-local` is refused without `allow_full_backup` and
     includes the local slots with it; a local slot is restored without being synced.
-12. `SetPwd` is never sent to any sensor.
+12. A node with `interval: never`, `at_boot: false`, `after_change: false` syncs only when asked;
+    a finger enrolled there reaches the others with the next manual sync.
+13. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
 `fingerprint_grow` and `fingerprint_grow_plus` with synthetic templates (no real biometric data).

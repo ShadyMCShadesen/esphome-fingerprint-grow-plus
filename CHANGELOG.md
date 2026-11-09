@@ -15,7 +15,8 @@ First version.
 - `guests:` guest fingers with an expiry date, deleted automatically (also across nodes).
 - `sync:` (optional) node-to-node sync of templates in the same slot: anti-entropy with per-slot
   versions and tombstones, conflicts instead of overwrites, `claim_all_slots`,
-  `resolve_conflict`, slot ranges (`include_slots` / `exclude_slots`), dry run.
+  `resolve_conflict`, slot ranges (`include_slots` / `exclude_slots`), dry run; automatic syncs
+  configurable (`interval` incl. `never`, `at_boot`, `after_change`).
   Without `sync:` the node is stand-alone and opens no network port.
 - Security: pre-shared key, mutual authentication, ChaCha20 + HMAC-SHA256, replay protection,
   source network allow list, resource limits; templates are never logged.

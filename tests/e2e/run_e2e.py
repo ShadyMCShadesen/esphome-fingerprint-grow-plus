@@ -38,6 +38,9 @@ NODES = {
     "node-f": {"port": 0, "peers": [], "include": ["0-199"], "exclude": [], "standalone": True},
     # node-g syncs only the admin slot 0 with node-a; all other slots are local
     "node-g": {"port": 18537, "peers": ["node-a"], "include": ["0"], "exclude": []},
+    # node-h only syncs when asked to (interval: never, no sync at boot or after changes)
+    "node-h": {"port": 18538, "peers": ["node-a"], "include": ["0-199"], "exclude": [],
+               "sync_extra": "    at_boot: false\n    after_change: false\n", "interval": "never"},
 }
 
 SEEDS = {
@@ -49,6 +52,7 @@ SEEDS = {
     "node-e": {"9": {"finger": "grace"}},
     "node-f": {"0": {"finger": "admin"}},
     "node-g": {"1": {"finger": "gina"}},
+    "node-h": {},
 }
 
 SYNC_BLOCK = """  sync:
@@ -57,9 +61,9 @@ SYNC_BLOCK = """  sync:
     peers: {peers}
     include_slots: {include}
     exclude_slots: {exclude}
-    interval: 15s
+    interval: {interval}
     dry_run: {dry_run}
-    on_done:
+{sync_extra}    on_done:
       - logger.log: "TEST-EVENT sync_done"
     on_failed:
       - logger.log:
@@ -203,6 +207,8 @@ class Cluster:
                 include=json.dumps(cfg["include"]),
                 exclude=json.dumps(cfg["exclude"]),
                 dry_run="true" if cfg.get("dry_run") else "false",
+                interval=cfg.get("interval", "15s"),
+                sync_extra=cfg.get("sync_extra", ""),
             )
             yaml = YAML_TEMPLATE.format(
                 name=name,
@@ -632,6 +638,30 @@ def main():
         results.append(wait_until("local slot 1 restored on G and still not synced",
                                   lambda: c.slots("node-g").get(1) == "gina"
                                   and "gina" not in c.slots("node-a").values(), 20))
+
+        print("== Scenario 12: interval never, no sync at boot or after changes, manual sync works")
+        results.append(wait_until("node-h did not sync on its own (no admin finger from A yet)",
+                                  lambda: 0 not in c.slots("node-h") and "Interval: never" in c.log("node-h")
+                                  and "Sync with" not in c.log("node-h"), 1))
+        c.cmd("node-h", "sync")
+        results.append(wait_until("manual sync: H receives A's fingers (admin in slot 0)",
+                                  lambda: c.slots("node-h").get(0) == "admin", 60))
+        time.sleep(3)
+        c.touch("node-h", "admin")
+        time.sleep(1.5)
+        c.touch("node-h", "admin")
+        results.append(wait_until("admin gesture on H starts an enrollment",
+                                  lambda: "TEST-EVENT enroll_started" in c.log("node-h"), 20))
+        time.sleep(1.5)
+        c.touches("node-h", "hugo", 2, gap=1.5)
+        results.append(wait_until("hugo enrolled on H", lambda: "hugo" in c.slots("node-h").values(), 30))
+        time.sleep(15)
+        results.append(wait_until("after_change: false - the new finger is not pushed by itself",
+                                  lambda: "hugo" not in c.slots("node-a").values()
+                                  and c.log("node-h").count("Sync with") == 1, 1))
+        c.cmd("node-h", "sync")
+        results.append(wait_until("the next manual sync brings hugo to A",
+                                  lambda: "hugo" in c.slots("node-a").values(), 60))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))

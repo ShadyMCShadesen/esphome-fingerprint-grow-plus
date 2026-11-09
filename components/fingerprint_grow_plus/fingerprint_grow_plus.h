@@ -116,7 +116,10 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void add_peer(const char *host, uint16_t port) { this->peers_.push_back(Peer{host, port}); }
   void add_include_range(uint16_t from, uint16_t to) { this->include_.push_back(SlotRange{from, to}); }
   void add_exclude_range(uint16_t from, uint16_t to) { this->exclude_.push_back(SlotRange{from, to}); }
+  /// 0 = never (no periodic rounds).
   void set_sync_interval(uint32_t ms) { this->sync_interval_ms_ = ms; }
+  void set_sync_at_boot(bool on) { this->sync_at_boot_ = on; }
+  void set_sync_after_change(bool on) { this->sync_after_change_ = on; }
   void set_startup_delay(uint32_t ms) { this->startup_delay_ms_ = ms; }
   void set_dry_run(bool dry_run) { this->dry_run_ = dry_run; }
   void set_meta_backend(MetaBackend backend) { this->backend_ = backend; }
@@ -264,6 +267,9 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint16_t next_version_();
   void mark_dirty_();
   void request_round_(uint32_t delay_ms);
+  /// Round after a local change (only with sync: after_change) / periodic (not with interval: never).
+  void request_change_round_(uint32_t delay_ms);
+  void request_periodic_round_();
   void set_status_(const char *status);
   void publish_diagnostics_();
   void queue_job_(Job &&job);
@@ -326,6 +332,8 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   std::vector<SlotRange> include_;
   std::vector<SlotRange> exclude_;
   uint32_t sync_interval_ms_{15 * 60 * 1000};
+  bool sync_at_boot_{true};
+  bool sync_after_change_{true};
   uint32_t startup_delay_ms_{10000};
   bool dry_run_{false};
   MetaBackend backend_{MetaBackend::PREFERENCES};

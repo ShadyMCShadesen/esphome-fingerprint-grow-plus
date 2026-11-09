@@ -64,10 +64,10 @@ Per slot (`protocol.h`):
 
 A sync **round** is started:
 
-- after boot,
-- 2 s after a local change (push),
-- every `sync: interval` (default 15 min),
-- by `fingerprint_grow_plus.sync`.
+- after boot (`sync: at_boot`, default on),
+- 2 s after a local change (`sync: after_change`, default on),
+- every `sync: interval` (default 15 min; `never` switches it off),
+- by `fingerprint_grow_plus.sync` (always).
 
 A round first re-reads the sensor's index table, which also catches changes made by
 `fingerprint_grow` actions. It then opens one session per peer, one after the other. In a session
