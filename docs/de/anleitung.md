@@ -17,7 +17,7 @@ Ohne `sync:` verlässt nichts das Gerät, und es wird kein Netzwerk-Port geöffn
 
 ```yaml
 external_components:
-  - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@main
+  - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@v0.2.0   # oder @main für den neuesten Stand
     components: [fingerprint_grow_plus]
 
 fingerprint_grow_plus:

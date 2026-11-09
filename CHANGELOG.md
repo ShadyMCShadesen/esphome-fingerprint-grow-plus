@@ -5,7 +5,21 @@ versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-First version.
+## [0.2.0] - 2026-11-09
+
+Complete rework of 0.1.0. Not compatible with 0.1.0: update all nodes and the tool together and
+take a new backup afterwards.
+
+### Changed (breaking)
+- Component renamed from `fingerprint_sync` to `fingerprint_grow_plus`, repository renamed to
+  `esphome-fingerprint-grow-plus`.
+- Configuration grouped into the blocks `admin:`, `guests:` and `sync:`; the triggers moved into
+  their blocks (`admin: on_touch`, `sync: on_conflict`, …). Without `sync:` a node is stand-alone.
+- Sync protocol version 4 (0.1.0: version 1); nodes with different versions refuse each other.
+- `tools/fpsync.py` is now `tools/growplus.py`; backups of 0.1.0 cannot be read.
+- Conflicts are no longer resolved with the sensor's template match (unreliable on R503): two
+  different templates in one slot are always a conflict.
+- `delete_all` only needs the code.
 
 ### Added
 - Component `fingerprint_grow_plus` next to the official `fingerprint_grow` on the same UART.
@@ -27,3 +41,12 @@ First version.
   A `sync:` block with only `key` gives a single node backup access without syncing.
 - Tests: crypto unit tests, Python/C++ interop, end-to-end tests with simulated R503 sensors on the
   ESPHome host platform; CI compile for ESP32 (Arduino, ESP-IDF) and ESP8266.
+
+### Removed
+- `sensor_address` option (fingerprint_grow always uses the default address).
+- `self_test` action (only needed for the initial hardware validation).
+
+## [0.1.0] - 2026-11-07
+
+First pre-release as `fingerprint_sync`: node-to-node template sync with preserved slot IDs,
+admin finger enrollment, backup tool, tests.

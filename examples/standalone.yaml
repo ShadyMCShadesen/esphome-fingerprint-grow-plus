@@ -22,7 +22,7 @@ ota:
 
 external_components:
   # For your own nodes use a pinned release instead:
-  #   - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@v0.1.0
+  #   - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@v0.2.0
   - source:
       type: local
       path: ../components

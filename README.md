@@ -33,7 +33,7 @@ network port is opened.
 
 ```yaml
 external_components:
-  - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@main   # or a release tag
+  - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@v0.2.0   # or @main for the latest state
     components: [fingerprint_grow_plus]
 
 fingerprint_grow_plus:
