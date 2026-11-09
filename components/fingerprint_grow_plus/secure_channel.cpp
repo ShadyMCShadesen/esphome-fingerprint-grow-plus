@@ -1,12 +1,13 @@
 #include "secure_channel.h"
 #include "crypto.h"
+#include "protocol.h"
 
 #include <cstring>
 
 namespace esphome::fingerprint_grow_plus {
 
 // The last byte is the protocol version: nodes with different versions refuse each other.
-static const uint8_t MAGIC[4] = {'F', 'G', 'P', 0x03};
+static const uint8_t MAGIC[4] = {'F', 'G', 'P', PROTOCOL_VERSION};
 static const uint8_t HKDF_SALT[] = {'g', 'r', 'o', 'w', 'p', 'l', 'u', 's', '-', 'v', '1'};
 static constexpr uint8_t HS_C_HELLO = 0x01;
 static constexpr uint8_t HS_S_HELLO = 0x02;

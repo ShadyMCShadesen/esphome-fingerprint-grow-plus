@@ -10,7 +10,7 @@
 
 namespace esphome::fingerprint_grow_plus {
 
-static constexpr uint8_t PROTOCOL_VERSION = 3;
+static constexpr uint8_t PROTOCOL_VERSION = 4;
 
 enum MsgType : uint8_t {
   /// u8 page | u8 flags(bit0 = last page) | u16 capacity | u16 count | count x Entry
@@ -28,7 +28,13 @@ enum MsgType : uint8_t {
   MSG_RESTORE = 0x06,
   /// u16 slot | u8 result (0 = ok)
   MSG_RESTORE_ACK = 0x07,
+  /// no payload: list the local-only slots (outside the synced range) for a full backup.
+  /// Only answered while a full-backup window is open; peers never send it.
+  MSG_LOCAL_LIST_REQ = 0x08,
+  /// u8 page | u8 flags(bit0 = last page, bit1 = refused) | u16 count | count x (u16 slot | u32 expires)
+  MSG_LOCAL_LIST = 0x09,
 };
+static constexpr size_t LOCAL_LIST_ENTRIES_PER_PAGE = 128;
 
 static constexpr size_t HASH_SIZE = 8;
 static constexpr size_t MANIFEST_ENTRY_SIZE = 2 + 2 + HASH_SIZE + 4;

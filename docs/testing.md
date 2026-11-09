@@ -32,7 +32,9 @@ End-to-end scenarios:
 10. A stand-alone node (no `sync:` block) enrolls with the admin gesture; with
     `access: delayed` a single admin touch fires `on_access`, two touches do not.
 11. A node that syncs only the admin slot receives it, keeps its local fingers out of the sync,
-    enrolls into a local slot with the admin gesture and reports `occupied_slots`.
+    enrolls into a local slot with the admin gesture and reports `occupied_slots`. A default backup
+    holds only the synced slot, `--include-local` is refused without `allow_full_backup` and
+    includes the local slots with it; a local slot is restored without being synced.
 12. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by

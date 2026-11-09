@@ -3,13 +3,15 @@
 
 Standard library only. Speaks the same authenticated, encrypted protocol as the nodes
 (see docs/protocol.md) and therefore needs the shared key and a node with a `sync:` block.
-Only synced slots are covered; local-only slots (outside include_slots) are not.
+By default only synced slots are saved; --include-local adds the local-only slots.
 
 Commands
   genkey                                   print a new random key for secrets.yaml
   status  --host H                         list the synced slots of a node (no template data)
   backup  --host H [--out FILE]            download all synced templates into an encrypted file
-                                           (default name: <host>-<date>_<time>.fgpb)
+          [--include-local]                (default name: <host>-<date>_<time>.fgpb);
+                                           --include-local also saves the slots that are not
+                                           synced (run allow_full_backup on the node first)
   restore --host H --in FILE [--slots ..]  upload templates (node must run allow_restore first)
   inspect --in FILE                        list the content of a backup file
 
@@ -30,10 +32,11 @@ import sys
 import time
 
 DEFAULT_PORT = 18530
-MAGIC = b"FGP\x03"  # last byte = protocol version
+MAGIC = b"FGP\x04"  # last byte = protocol version
 TAG_SIZE = 16
 MAX_RECORD_BODY = 2560
-MSG_MANIFEST, MSG_TEMPLATE_REQ, MSG_TEMPLATE, MSG_TEMPLATE_NAK, MSG_DONE, MSG_RESTORE, MSG_RESTORE_ACK = range(1, 8)
+(MSG_MANIFEST, MSG_TEMPLATE_REQ, MSG_TEMPLATE, MSG_TEMPLATE_NAK, MSG_DONE, MSG_RESTORE, MSG_RESTORE_ACK,
+ MSG_LOCAL_LIST_REQ, MSG_LOCAL_LIST) = range(1, 10)
 STATE_NAMES = {0: "none", 1: "present", 2: "present (forced)", 3: "deleted"}
 
 
@@ -206,6 +209,46 @@ def read_manifest(ch: Channel):
             raise ConnectionError(f"unexpected message 0x{msg[0]:02x} while reading manifest")
 
 
+def read_local_list(ch: Channel):
+    """Ask for the local-only slots (needs an open full-backup window on the node)."""
+    ch.send(bytes([MSG_LOCAL_LIST_REQ]))
+    entries = {}
+    while True:
+        msg = ch.recv()
+        if msg[0] != MSG_LOCAL_LIST:
+            continue  # e.g. DONE from the node
+        flags = msg[2]
+        if flags & 2:
+            return None
+        count = struct.unpack(">H", msg[3:5])[0]
+        pos = 5
+        for _ in range(count):
+            slot, expires = struct.unpack(">HI", msg[pos : pos + 6])
+            entries[slot] = expires
+            pos += 6
+        if flags & 1:
+            return entries
+
+
+def fetch_template(ch: Channel, slot: int):
+    """Returns (meta, expires, data) or None if the node could not read the slot."""
+    ch.send(bytes([MSG_TEMPLATE_REQ]) + struct.pack(">H", slot))
+    while True:
+        msg = ch.recv()
+        if msg[0] in (MSG_TEMPLATE, MSG_TEMPLATE_NAK):
+            break
+    if msg[0] == MSG_TEMPLATE_NAK:
+        return None
+    r_slot, r_meta = struct.unpack(">HH", msg[1:5])
+    r_hash = msg[5:13]
+    r_expires = struct.unpack(">I", msg[13:17])[0]
+    length = struct.unpack(">H", msg[17:19])[0]
+    data = msg[19 : 19 + length]
+    if r_slot != slot or hashlib.sha256(data).digest()[:8] != r_hash:
+        sys.exit(f"slot {slot}: checksum mismatch, backup aborted")
+    return r_meta, r_expires, data
+
+
 def finish(ch: Channel):
     ch.send(bytes([MSG_DONE]))
     try:
@@ -293,31 +336,31 @@ def cmd_backup(args):
     ch = connect(args, key)
     entries = read_manifest(ch)
     wanted = parse_slots(args.slots)
+    todo = [(slot, False) for slot, (meta, _d, _e) in sorted(entries.items()) if (meta >> 14) in (1, 2)]
+    if args.include_local:
+        local = read_local_list(ch)
+        if local is None:
+            finish(ch)
+            sys.exit("Node refused the local slots: run the fingerprint_grow_plus.allow_full_backup action "
+                     "on the node first (or leave out --include-local)")
+        todo += [(slot, True) for slot in sorted(local)]
     slots = {}
-    for slot, (meta, digest, _expires) in sorted(entries.items()):
-        if (meta >> 14) not in (1, 2) or (wanted and slot not in wanted):
+    for slot, is_local in sorted(todo):
+        if wanted and slot not in wanted:
             continue
-        ch.send(bytes([MSG_TEMPLATE_REQ]) + struct.pack(">H", slot))
-        while True:
-            msg = ch.recv()
-            if msg[0] in (MSG_TEMPLATE, MSG_TEMPLATE_NAK):
-                break
-        if msg[0] == MSG_TEMPLATE_NAK:
+        result = fetch_template(ch, slot)
+        if result is None:
             print(f"  slot {slot}: node could not read it", file=sys.stderr)
             continue
-        r_slot, r_meta = struct.unpack(">HH", msg[1:5])
-        r_hash = msg[5:13]
-        r_expires = struct.unpack(">I", msg[13:17])[0]
-        length = struct.unpack(">H", msg[17:19])[0]
-        data = msg[19 : 19 + length]
-        if r_slot != slot or hashlib.sha256(data).digest()[:8] != r_hash:
-            sys.exit(f"slot {slot}: checksum mismatch, backup aborted")
-        slots[str(slot)] = {"meta": r_meta, "expires": r_expires, "template": base64.b64encode(data).decode()}
-        print(f"  slot {slot}: {length} bytes")
+        meta, expires, data = result
+        slots[str(slot)] = {"meta": meta, "expires": expires, "local": is_local,
+                            "template": base64.b64encode(data).decode()}
+        print(f"  slot {slot}: {len(data)} bytes{' (local only)' if is_local else ''}")
     finish(ch)
     write_backup(args.out, key, {"node": f"{ch.peer_id:08X}", "host": args.host, "created": int(time.time()),
                                  "slots": slots})
-    print(f"Backup of {len(slots)} template(s) written to {args.out}")
+    n_local = sum(1 for e in slots.values() if e["local"])
+    print(f"Backup of {len(slots)} template(s) ({n_local} local only) written to {args.out}")
 
 
 def cmd_inspect(args):
@@ -325,7 +368,8 @@ def cmd_inspect(args):
     print(f"Backup of node {data['node']} ({data['host']}), created {time.ctime(data['created'])}")
     for slot, entry in sorted(data["slots"].items(), key=lambda kv: int(kv[0])):
         size = len(base64.b64decode(entry["template"]))
-        print(f"  slot {int(slot):4d}  version {entry['meta'] & 0x3FFF}  {size} bytes")
+        kind = "local only" if entry.get("local") else f"version {entry['meta'] & 0x3FFF}"
+        print(f"  slot {int(slot):4d}  {kind:12s}  {size} bytes")
 
 
 def cmd_restore(args):
@@ -355,7 +399,7 @@ def cmd_restore(args):
         else:
             print(f"  slot {slot}: FAILED on the node", file=sys.stderr)
     finish(ch)
-    print(f"{ok} template(s) restored; the node propagates them to its peers")
+    print(f"{ok} template(s) restored; synced slots are propagated to the peers, local-only slots stay on the node")
 
 
 def main():
@@ -378,6 +422,8 @@ def main():
     common(p)
     p.add_argument("--out", help="output file (default: <host>-<date>_<time>.fgpb)")
     p.add_argument("--slots", help="e.g. 0,2,10-19 (default: all)")
+    p.add_argument("--include-local", "--all", action="store_true",
+                   help="also save slots that are not synced (needs allow_full_backup on the node)")
     p.set_defaults(func=cmd_backup)
     p = sub.add_parser("restore")
     common(p)

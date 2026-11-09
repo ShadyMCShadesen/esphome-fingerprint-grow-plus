@@ -39,9 +39,15 @@
 6. **Go live.** Set `sync: dry_run: false` on both nodes and verify. Then add the remaining nodes,
    again with a dry run first.
 
-The tool talks to the node over the sync connection: it needs the `sync:` block and covers only
-synced slots. Local-only slots (outside `include_slots`, or a node without `sync:`) are not in the
-backup.
+The tool talks to the node over the sync connection, so the node needs a `sync:` block (for a
+single node a block with only `key` is enough). By default it saves the synced slots. To include
+the slots that are not synced (outside `include_slots`), open the full-backup window on the node
+first and add `--include-local`:
+
+```bash
+# on the node: fingerprint_grow_plus.allow_full_backup (open for 5 minutes by default)
+python3 tools/growplus.py backup --host <node>.local --include-local
+```
 
 ## Restore / rollback
 
@@ -53,8 +59,9 @@ backup.
    python3 tools/growplus.py restore --host <node>.local --in backup.fgpb [--slots 0,2,10-19]
    ```
 
-3. Restored slots get a new, forced version. **They replace the slot on all peers**, which is the
-   point of a rollback. If you only want to repair one node, restore only the slots in question.
+3. Restored synced slots get a new, forced version. **They replace the slot on all peers**, which
+   is the point of a rollback. If you only want to repair one node, restore only the slots in
+   question. Local-only slots from an `--include-local` backup are written to this node only.
 
 ## Replacing a sensor
 

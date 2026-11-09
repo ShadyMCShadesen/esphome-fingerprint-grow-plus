@@ -21,6 +21,8 @@ First version.
   source network allow list, resource limits; templates are never logged.
 - Enrollment without Home Assistant: admin finger, button, web UI (`enroll_next_free`).
 - Entities: `occupied_slots`, sync status, peers reachable, errors, conflicts, last sync, syncing.
-- `tools/growplus.py`: key generation, status, encrypted backup, restore, inspect.
+- `tools/growplus.py`: key generation, status, encrypted backup, restore, inspect;
+  `backup --include-local` also saves the slots that are not synced (after `allow_full_backup`).
+  A `sync:` block with only `key` gives a single node backup access without syncing.
 - Tests: crypto unit tests, Python/C++ interop, end-to-end tests with simulated R503 sensors on the
   ESPHome host platform; CI compile for ESP32 (Arduino, ESP-IDF) and ESP8266.

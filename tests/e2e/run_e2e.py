@@ -174,6 +174,7 @@ interval:
           else if (c == "delete_all") id(fp_plus).delete_all("TEST_ALL");
           else if (c == "delete_all_wrong") id(fp_plus).delete_all("nope");
           else if (c == "allow_restore") id(fp_plus).allow_restore(120);
+          else if (c == "allow_full_backup") id(fp_plus).allow_full_backup(120);
           else if (c == "self_test") id(fp_plus).self_test(a, b);
           else if (c == "resolve_all") id(fp_plus).resolve_all_conflicts(a != 0);
           else if (c == "claim_all") id(fp_plus).claim_all_slots();
@@ -608,6 +609,40 @@ def main():
                                   lambda: "Occupied slots: 0-2" in c.log("node-g"), 10))
         results.append(wait_until("G's local fingers never reach A",
                                   lambda: all(f not in c.slots("node-a").values() for f in ("gina", "hank")), 1))
+
+        print("== Scenario 11b: backup and restore of local-only slots (--include-local)")
+        g_port = str(NODES["node-g"]["port"])
+
+        def g_tool(*extra):
+            r = subprocess.run(tool + list(extra) + ["--host", "127.0.0.1", "--port", g_port],
+                               capture_output=True, text=True, env=env, check=False)
+            print(r.stdout + r.stderr)
+            return r
+
+        res = g_tool("backup", "--out", str(OUT / "node-g-synced.fgpb"))
+        results.append(wait_until("default backup of G holds only the synced slot 0",
+                                  lambda: res.returncode == 0 and "  slot 0:" in res.stdout
+                                  and "  slot 1:" not in res.stdout, 1))
+        res = g_tool("backup", "--include-local", "--out", str(OUT / "node-g-refused.fgpb"))
+        results.append(wait_until("--include-local is refused while the full backup window is closed",
+                                  lambda: res.returncode != 0 and "allow_full_backup" in (res.stdout + res.stderr)
+                                  and not (OUT / "node-g-refused.fgpb").exists(), 1))
+        c.cmd("node-g", "allow_full_backup")
+        time.sleep(2)
+        full = OUT / "node-g-full.fgpb"
+        res = g_tool("backup", "--include-local", "--out", str(full))
+        results.append(wait_until("full backup of G holds slot 0 and the local slots 1 and 2",
+                                  lambda: res.returncode == 0 and "  slot 0:" in res.stdout
+                                  and "  slot 1: 1536 bytes (local only)" in res.stdout
+                                  and "  slot 2: 1536 bytes (local only)" in res.stdout, 1))
+        c.cmd("node-g", "delete 1")
+        results.append(wait_until("local slot 1 deleted on G", lambda: 1 not in c.slots("node-g"), 15))
+        c.cmd("node-g", "allow_restore")
+        time.sleep(2)
+        res = g_tool("restore", "--in", str(full), "--slots", "1")
+        results.append(wait_until("local slot 1 restored on G and still not synced",
+                                  lambda: c.slots("node-g").get(1) == "gina"
+                                  and "gina" not in c.slots("node-a").values(), 20))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))

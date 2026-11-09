@@ -201,6 +201,7 @@ Linux / macOS:
 ```bash
 export GROWPLUS_KEY='<Schlüssel>'
 python3 tools/growplus.py backup  --host <geraet>.local
+python3 tools/growplus.py backup  --host <geraet>.local --include-local   # auch nicht synchronisierte
 python3 tools/growplus.py inspect --in <geraet>-<datum>_<uhrzeit>.fgpb
 # am Gerät zuerst fingerprint_grow_plus.allow_restore auslösen, dann:
 python3 tools/growplus.py restore --host <geraet>.local --in <datei>.fgpb
@@ -211,12 +212,19 @@ Windows (PowerShell):
 ```powershell
 $env:GROWPLUS_KEY = '<Schlüssel>'
 py tools\growplus.py backup  --host <geraet>.local
+py tools\growplus.py backup  --host <geraet>.local --include-local
 py tools\growplus.py inspect --in <geraet>-<datum>_<uhrzeit>.fgpb
 py tools\growplus.py restore --host <geraet>.local --in <datei>.fgpb
 ```
 
-Das Tool braucht den `sync:`-Block und sichert nur synchronisierte Slots: Ein Gerät ohne Sync
-oder die lokalen Slots eines Geräts mit `include_slots` lassen sich so nicht sichern.
+- `backup` sichert die synchronisierten Slots. Mit `--include-local` (oder `--all`) zusätzlich die
+  Slots, die nicht synchronisiert werden (außerhalb von `include_slots`). Die gibt das Gerät nur
+  heraus, nachdem am Gerät `fingerprint_grow_plus.allow_full_backup` ausgelöst wurde (5 min).
+- `restore` braucht vorher `fingerprint_grow_plus.allow_restore`. Synchronisierte Slots werden
+  dabei auf allen Geräten ersetzt, lokale Slots bleiben lokal.
+- Das Tool verbindet sich über den Sync-Port, das Gerät braucht also einen `sync:`-Block. Für ein
+  einzelnes Gerät reicht ein `sync:`-Block nur mit `key` (ohne `peers`): Er öffnet den Port für
+  das Tool und synchronisiert mit niemandem.
 
 Ohne `--out` heißt die Datei `<geraet>-<datum>_<uhrzeit>.fgpb`. Statt der Umgebungsvariable geht
 auf jedem System auch `--key-file <datei>`. Backup-Dateien enthalten biometrische Daten: nie in

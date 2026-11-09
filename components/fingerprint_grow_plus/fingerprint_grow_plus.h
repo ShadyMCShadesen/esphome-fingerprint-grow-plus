@@ -101,6 +101,8 @@ struct Session {
   bool done_received{false};
   uint16_t pulled{0};
   uint16_t served{0};
+  /// The client asked for the local-only slots during a full-backup window (backup tool).
+  bool local_ok{false};
 };
 
 class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
@@ -210,6 +212,8 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void resolve_conflict(uint16_t slot, bool keep_local);
   /// Accept MSG_RESTORE from the backup tool for `seconds`.
   void allow_restore(uint32_t seconds);
+  /// Also hand out local-only slots (outside the synced range) to the backup tool for `seconds`.
+  void allow_full_backup(uint32_t seconds);
   /// Diagnostic: exercise LoadChar/UpChar/DownChar/Match on `slot` using only the sensor's
   /// character buffers (no slot is written) and log every step.
   void self_test(uint16_t slot, uint16_t compare_slot = NO_SLOT);
@@ -414,6 +418,9 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   std::vector<ESPPreferenceObject> expiry_prefs_;
   uint32_t restore_until_ms_{0};
   bool restore_open_{false};
+  uint32_t full_backup_until_ms_{0};
+  bool full_backup_open_{false};
+  void send_local_list_(Session &s);
   uint32_t error_count_{0};
   const char *status_{""};
 

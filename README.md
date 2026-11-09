@@ -224,12 +224,19 @@ the sync connection; backup files are encrypted with the key.
 ```bash
 export GROWPLUS_KEY='<key>'                                    # PowerShell: $env:GROWPLUS_KEY = '<key>'
 python3 tools/growplus.py backup --host reader-garden.local     # -> reader-garden-<date>_<time>.fgpb
+python3 tools/growplus.py backup --host reader-garden.local --include-local
 python3 tools/growplus.py restore --host reader-garden.local --in <file>.fgpb
 ```
 
-A restore needs `fingerprint_grow_plus.allow_restore` on the node first. The tool needs the
-`sync:` block and covers only synced slots: a stand-alone node, or the local-only slots of a node
-with `include_slots`, cannot be backed up this way. Details: [docs/operations.md](docs/operations.md).
+- `backup` saves the synced slots. `--include-local` also saves the slots that are not synced
+  (outside `include_slots`); the node hands them out only after `fingerprint_grow_plus.allow_full_backup`.
+- `restore` needs `fingerprint_grow_plus.allow_restore` on the node first. Restored synced slots
+  replace the slot on all nodes; local-only slots stay local.
+- The tool connects over the sync port, so the node needs a `sync:` block. For a single node
+  without other nodes, a `sync:` block with only `key` is enough: it opens the port for the tool
+  and syncs with nobody.
+
+Details: [docs/operations.md](docs/operations.md).
 
 ## Configuration reference
 
@@ -276,7 +283,7 @@ fingerprint_grow_plus:
 
   sync:
     key: !secret fingerprint_grow_plus_key   # required: base64 of 32 random bytes
-    peers:                            # required: all nodes (name, name.local, IP, host:port)
+    peers:                            # all nodes (name, name.local, IP, host:port); none = tool only
       - reader-garden.local           # mDNS: same subnet only
       - reader-garage.example.lan     # DNS
       - 192.168.10.23
@@ -311,6 +318,7 @@ fingerprint_grow_plus:
 | `resolve_conflict` | `slot`, `keep_local` | `true`: this node's finger wins; `false`: take the peer's |
 | `resolve_all_conflicts` | `keep_local` | the same for all current conflicts |
 | `allow_restore` | `duration` (5min) | accept a restore from `tools/growplus.py` |
+| `allow_full_backup` | `duration` (5min) | let `tools/growplus.py backup --include-local` read the slots that are not synced |
 | `self_test` | `slot` (0), `compare_slot` | diagnostic template round trip on this sensor, writes nothing |
 
 All actions are called as `fingerprint_grow_plus.<action>`.

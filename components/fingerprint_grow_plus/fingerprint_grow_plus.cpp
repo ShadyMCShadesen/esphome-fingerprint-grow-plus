@@ -560,7 +560,11 @@ void FingerprintGrowPlusComponent::job_serve_(Job &job) {
   if (s == nullptr)
     return;
   const uint16_t slot = job.slot;
-  if (!this->managed_(slot) || !meta_present(this->meta_[slot]) || !this->hash_known_[slot]) {
+  // Synced slots go to every authenticated peer. Local-only slots only to the backup tool, and
+  // only after it asked for them during a full-backup window (MSG_LOCAL_LIST_REQ).
+  const bool synced = this->managed_(slot) && meta_present(this->meta_[slot]) && this->hash_known_[slot];
+  const bool local = s->local_ok && slot < this->capacity_ && !this->managed_(slot) && this->local_present_[slot];
+  if (!synced && !local) {
     this->send_simple_(*s, MSG_TEMPLATE_NAK, slot, 1, true);
     return;
   }
@@ -574,7 +578,7 @@ void FingerprintGrowPlusComponent::job_serve_(Job &job) {
   }
   uint8_t digest[32];
   crypto::sha256(data.data(), data.size(), digest);
-  if (memcmp(digest, this->hash_[slot].data(), HASH_SIZE) != 0) {
+  if (synced && memcmp(digest, this->hash_[slot].data(), HASH_SIZE) != 0) {
     // The module returned different bytes for the same slot (see docs: assumption A2).
     ESP_LOGW(TAG, "Template bytes of slot %u changed since indexing; updating the hash", slot);
     memcpy(this->hash_[slot].data(), digest, HASH_SIZE);
@@ -583,7 +587,7 @@ void FingerprintGrowPlusComponent::job_serve_(Job &job) {
   MsgWriter w(msg);
   w.u8(MSG_TEMPLATE);
   w.u16(slot);
-  w.u16(this->meta_[slot]);
+  w.u16(synced ? this->meta_[slot] : 0);
   w.bytes(digest, HASH_SIZE);
   w.u32(this->expires_[slot]);
   w.u16((uint16_t) data.size());
@@ -655,6 +659,20 @@ void FingerprintGrowPlusComponent::job_write_(Job &job) {
     ESP_LOGE(TAG, "Downloading template for slot %u failed at %s (0x%02X, %u answer bytes, template %u bytes)", slot,
              this->link_.last_step(), res, (unsigned) this->link_.last_rx_bytes(), (unsigned) job.data.size());
 
+  if (restore && ok && !this->managed_(slot)) {
+    // Local-only slot: no version, nothing to propagate.
+    this->local_present_[slot] = true;
+    this->set_expiry_(slot, job.expires);
+    if (!this->count_queued_) {
+      this->count_queued_ = true;
+      this->queue_simple_job_(JobType::COUNT);
+    }
+    this->slot_updated_cb_.call(slot);
+    ESP_LOGI(TAG, "Slot %u restored (local only)", slot);
+    if (s != nullptr)
+      this->send_simple_(*s, MSG_RESTORE_ACK, slot, 0, true);
+    return;
+  }
   uint16_t meta = job.meta;
   if (restore) {
     meta = meta_pack(SLOT_PRESENT_FORCED, this->next_version_());
@@ -969,6 +987,49 @@ void FingerprintGrowPlusComponent::resolve_conflict(uint16_t slot, bool keep_loc
     ESP_LOGI(TAG, "Slot %u: taking the peer's finger", slot);
   }
   this->publish_diagnostics_();
+}
+
+void FingerprintGrowPlusComponent::allow_full_backup(uint32_t seconds) {
+  if (!this->network_) {
+    ESP_LOGW(TAG, "allow_full_backup: needs the sync: block (the backup tool connects over the network)");
+    return;
+  }
+  this->full_backup_until_ms_ = millis() + seconds * 1000;
+  this->full_backup_open_ = seconds > 0;
+  ESP_LOGW(TAG, "Full backup window %s for %" PRIu32 " s (local-only slots readable by the backup tool)",
+           this->full_backup_open_ ? "OPEN" : "closed", seconds);
+}
+
+void FingerprintGrowPlusComponent::send_local_list_(Session &s) {
+  const bool open = this->full_backup_open_ && (int32_t) (this->full_backup_until_ms_ - millis()) > 0;
+  std::vector<uint16_t> slots;
+  if (open && !s.is_client) {
+    for (uint16_t slot = 0; slot < this->capacity_; slot++) {
+      if (!this->managed_(slot) && this->local_present_[slot])
+        slots.push_back(slot);
+    }
+    s.local_ok = true;
+    ESP_LOGW(TAG, "Full backup: %u local-only slot(s) offered to %08" PRIX32, (unsigned) slots.size(),
+             s.channel.peer_id());
+  } else {
+    ESP_LOGW(TAG, "Local slot list refused (full backup window closed)");
+  }
+  size_t pages = std::max<size_t>(1, (slots.size() + LOCAL_LIST_ENTRIES_PER_PAGE - 1) / LOCAL_LIST_ENTRIES_PER_PAGE);
+  std::vector<uint8_t> msg;
+  for (size_t page = 0; page < pages; page++) {
+    size_t first = page * LOCAL_LIST_ENTRIES_PER_PAGE;
+    size_t count = std::min(LOCAL_LIST_ENTRIES_PER_PAGE, slots.size() - std::min(first, slots.size()));
+    MsgWriter w(msg);
+    w.u8(MSG_LOCAL_LIST);
+    w.u8((uint8_t) page);
+    w.u8((page + 1 == pages ? 1 : 0) | (s.local_ok ? 0 : 2));
+    w.u16((uint16_t) count);
+    for (size_t i = 0; i < count; i++) {
+      w.u16(slots[first + i]);
+      w.u32(this->expires_[slots[first + i]]);
+    }
+    this->send_message_(s, msg);
+  }
 }
 
 void FingerprintGrowPlusComponent::allow_restore(uint32_t seconds) {
@@ -1328,6 +1389,13 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
     case MSG_DONE:
       s.done_received = true;
       break;
+    case MSG_LOCAL_LIST_REQ:
+      if (s.local_ok) {
+        this->end_session_(s, false, "local slot list requested twice");
+        return;
+      }
+      this->send_local_list_(s);
+      break;
     case MSG_RESTORE: {
       uint16_t slot, len;
       uint32_t expires;
@@ -1646,6 +1714,10 @@ void FingerprintGrowPlusComponent::loop() {
     this->meta_dirty_ = false;
     this->save_queued_ = true;
     this->queue_simple_job_(JobType::SAVE_META);
+  }
+  if (this->full_backup_open_ && (int32_t) (this->full_backup_until_ms_ - now) <= 0) {
+    this->full_backup_open_ = false;
+    ESP_LOGI(TAG, "Full backup window closed");
   }
   if (this->restore_open_ && (int32_t) (this->restore_until_ms_ - now) <= 0) {
     this->restore_open_ = false;

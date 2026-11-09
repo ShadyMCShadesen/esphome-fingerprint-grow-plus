@@ -154,8 +154,9 @@ def _empty_dict_if_none(value):
 SYNC_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_KEY): validate_key,
-        # All nodes of the cluster; a node skips itself (name or name.local).
-        cv.Required(CONF_PEERS): cv.All(cv.ensure_list(validate_peer), cv.Length(min=1)),
+        # All nodes of the cluster; a node skips itself (name or name.local). Without peers the
+        # node only accepts the backup tool (backup access for a single node).
+        cv.Optional(CONF_PEERS, default=[]): cv.ensure_list(validate_peer),
         cv.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
         cv.Optional(CONF_ALLOWED_NETWORKS): socket.IPV4_ALLOW_SCHEMA,
         # Synced slots (default: all) minus excluded ones. Local features use all slots.
@@ -569,6 +570,19 @@ _action(
         key=CONF_DURATION,
     ),
     automation.ApplyField(CONF_DURATION, "allow_restore", cg.uint32),
+)
+_action(
+    "allow_full_backup",
+    cv.maybe_simple_value(
+        {
+            _PARENT: _PARENT_ID,
+            cv.Optional(CONF_DURATION, default="5min"): cv.templatable(
+                cv.positive_time_period_seconds
+            ),
+        },
+        key=CONF_DURATION,
+    ),
+    automation.ApplyField(CONF_DURATION, "allow_full_backup", cg.uint32),
 )
 
 # --- diagnostics -----------------------------------------------------------------------
