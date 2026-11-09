@@ -100,6 +100,7 @@ struct Session {
   bool done_received{false};
   uint16_t pulled{0};
   uint16_t served{0};
+  uint16_t served_local{0};
   /// The client asked for the local-only slots during a full-backup window (backup tool).
   bool local_ok{false};
 };

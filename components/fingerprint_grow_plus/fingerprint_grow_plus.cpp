@@ -610,6 +610,8 @@ void FingerprintGrowPlusComponent::job_serve_(Job &job) {
   this->send_message_(*s, msg);
   crypto::wipe(msg.data(), msg.size());
   s->served++;
+  if (!synced)
+    s->served_local++;
 }
 
 bool FingerprintGrowPlusComponent::store_verified_(uint8_t buffer, uint16_t slot, const std::vector<uint8_t> &data) {
@@ -950,8 +952,8 @@ void FingerprintGrowPlusComponent::send_local_list_(Session &s) {
         slots.push_back(slot);
     }
     s.local_ok = true;
-    ESP_LOGW(TAG, "Full backup: %u local-only slot(s) offered to %08" PRIX32, (unsigned) slots.size(),
-             s.channel.peer_id());
+    ESP_LOGW(TAG, "Full backup for %08" PRIX32 ": %u local-only slot(s) offered in addition to the synced slots",
+             s.channel.peer_id(), (unsigned) slots.size());
   } else {
     ESP_LOGW(TAG, "Local slot list refused (full backup window closed)");
   }
@@ -1166,6 +1168,8 @@ static void reset_session(Session &s) {
   s.done_received = false;
   s.pulled = 0;
   s.served = 0;
+  s.served_local = 0;
+  s.local_ok = false;  // the full-backup permission belongs to one session only
   s.peer = nullptr;
 }
 
@@ -1381,7 +1385,10 @@ void FingerprintGrowPlusComponent::end_session_(Session &s, bool ok, const char 
   if (s.phase == Session::Phase::IDLE)
     return;
   const char *who = s.is_client && s.peer != nullptr ? s.peer->host : "inbound peer";
-  if (ok) {
+  if (ok && s.local_ok) {
+    ESP_LOGI(TAG, "Full backup for %08" PRIX32 " finished: %u template(s) sent (%u synced, %u local-only)",
+             s.channel.peer_id(), s.served, s.served - s.served_local, s.served_local);
+  } else if (ok) {
     ESP_LOGI(TAG, "Sync with %s finished: %u received, %u sent", who, s.pulled, s.served);
   } else {
     ESP_LOGW(TAG, "Sync with %s failed: %s", who, reason);

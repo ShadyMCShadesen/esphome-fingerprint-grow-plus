@@ -9,11 +9,13 @@ Exit code 0 = all scenarios passed.
 """
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import time
@@ -630,6 +632,28 @@ def main():
                                   lambda: res.returncode == 0 and "  slot 0:" in res.stdout
                                   and "  slot 1: 1536 bytes (local only)" in res.stdout
                                   and "  slot 2: 1536 bytes (local only)" in res.stdout, 1))
+        results.append(wait_until("node logs the full backup with synced and local counts",
+                                  lambda: "template(s) sent (1 synced, 2 local-only)" in c.log("node-g"), 5))
+
+        # The permission belongs to that one session: a later session must not get local slots,
+        # even while the window is still open, unless it asks for them itself.
+        def later_session_gets_local_slot():
+            sock = _socket.create_connection(("127.0.0.1", int(g_port)), timeout=10)
+            ch = growplus.Channel(sock, base64.b64decode(KEY), 0x1235)
+            ch.handshake()
+            ch.send(bytes([growplus.MSG_MANIFEST, 0, 1]) + struct.pack(">HH", 0, 0))
+            growplus.read_manifest(ch)
+            ch.send(bytes([growplus.MSG_TEMPLATE_REQ]) + struct.pack(">H", 1))
+            while True:
+                msg = ch.recv()
+                if msg[0] in (growplus.MSG_TEMPLATE, growplus.MSG_TEMPLATE_NAK):
+                    break
+            sock.close()
+            return msg[0] == growplus.MSG_TEMPLATE
+
+        time.sleep(2)
+        results.append(wait_until("a later session cannot read local slots without asking",
+                                  lambda: not later_session_gets_local_slot(), 1))
         c.cmd("node-g", "delete 1")
         results.append(wait_until("local slot 1 deleted on G", lambda: 1 not in c.slots("node-g"), 15))
         c.cmd("node-g", "allow_restore")
