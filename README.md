@@ -318,7 +318,6 @@ fingerprint_grow_plus:
 | `resolve_all_conflicts` | `keep_local` | the same for all current conflicts |
 | `allow_restore` | `duration` (5min) | accept a restore from `tools/growplus.py` |
 | `allow_full_backup` | `duration` (5min) | let `tools/growplus.py backup --include-local` read the slots that are not synced |
-| `self_test` | `slot` (0), `compare_slot` | diagnostic template round trip on this sensor, writes nothing |
 
 All actions are called as `fingerprint_grow_plus.<action>`.
 Conditions: `fingerprint_grow_plus.is_ready`, `is_syncing`, `is_admin_busy`, `is_admin_slot`.

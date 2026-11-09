@@ -2,10 +2,12 @@
 
 ## Automated (runs in CI)
 
+`tests/check.sh` runs all of them with short output (`--quick` skips the end-to-end tests).
+
 | test | command | covers |
 |---|---|---|
 | crypto unit tests | `tests/run_unit_tests.sh` | ChaCha20 vs OpenSSL, HKDF vs RFC 5869, handshake, tamper/replay/wrong key/self connection, byte-exact interop with `tools/growplus.py` |
-| end-to-end | `python3 tests/e2e/run_e2e.py` | 6 real firmware builds (ESPHome host platform) + simulated R503 sensors, see below |
+| end-to-end | `python3 tests/e2e/run_e2e.py` | 7 real firmware builds (ESPHome host platform) + simulated R503 sensors, see below |
 | config + compile | GitHub Actions | `esphome config` and `esphome compile` for ESP32 Arduino, ESP32 ESP-IDF, ESP8266 |
 
 End-to-end scenarios:
@@ -52,8 +54,8 @@ Recommended for the proof of concept: two nodes with the same hardware but diffe
 | A1 | a template exported from sensor X matches on sensor Y | limit both nodes to one test slot (`sync: include_slots: ["190"]`, `dry_run: false`), enroll a test finger there on node 1, sync, touch node 2 | `on_finger_scan_matched` with the same slot on node 2 |
 | A2 | `UpChar` of a slot returns identical bytes each time | log line `Template bytes of slot … changed` must not appear after two rounds | no such line (if it appears: harmless, sync still correct) |
 | A3 | template size and packet size | check `Slot N indexed (template … bytes)` and `Sensor: capacity …, packet size …` | **observed on R503: 1536 bytes, 128-byte packets** (manual: 768) |
-| A4 | a template survives sensor → ESP → sensor unchanged | run `fingerprint_grow_plus.self_test` and read `SELF TEST 2/3/4: round trip …` | **observed on R503: BYTE-IDENTICAL with 0, 10 and 40 ms gaps** (10 ms default kept as margin) |
-| A5 | `Match` template vs template | `self_test` variants 1 and 5 | **observed on R503: arbitrary scores (0 or 92 for the same pair)** → not used by the sync |
+| A4 | a template survives sensor → ESP → sensor unchanged | every sync write is read back and compared byte by byte; `Verification of slot … failed` must not appear | **observed on R503: byte-identical with 0, 10 and 40 ms packet gaps** (10 ms used as margin) |
+| A5 | `Match` template vs template | (checked during development) | **observed on R503: arbitrary scores (0 or 92 for the same pair)** → not used |
 
 ### B. Functional tests
 

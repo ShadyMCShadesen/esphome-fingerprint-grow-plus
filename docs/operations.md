@@ -90,7 +90,6 @@ have to be enrolled again or restored from a backup). With
 | `Verification of slot X failed` | sensor stored something else than sent | check wiring/power; compatibility test A1 |
 | `Template bytes of slot X changed since indexing` | sensor returned different bytes for the same slot (assumption A2 false) | harmless; the stored hash is updated |
 | `Connection lost: 0` (warning from the TCP helper) | peer closed the connection after a finished session | harmless |
-| `Verification of slot X failed` right after a sync write | the template did not arrive byte-identical | run `fingerprint_grow_plus.self_test`; the `round trip` lines show whether transfers are lossless |
 | `Sensor parameters unreliable` | two `ReadSysPara` answers differed or were implausible | retried automatically; power-cycle the sensor if it persists |
 | status `sensor error` | `fingerprint_grow` failed / sensor not answering | check sensor, power, UART |
 | sync never runs | enrollment still active (a started enrollment blocks the sensor buffers) | finish or cancel the enrollment |

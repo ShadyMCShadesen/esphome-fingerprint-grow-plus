@@ -10,7 +10,6 @@ Exit code 0 = all scenarios passed.
 
 import argparse
 import json
-import re
 import os
 from pathlib import Path
 import shutil
@@ -175,7 +174,6 @@ interval:
           else if (c == "delete_all_wrong") id(fp_plus).delete_all("nope");
           else if (c == "allow_restore") id(fp_plus).allow_restore(120);
           else if (c == "allow_full_backup") id(fp_plus).allow_full_backup(120);
-          else if (c == "self_test") id(fp_plus).self_test(a, b);
           else if (c == "resolve_all") id(fp_plus).resolve_all_conflicts(a != 0);
           else if (c == "claim_all") id(fp_plus).claim_all_slots();
           else if (c == "enroll_guest") id(fp_plus).enroll_guest(2, 25);
@@ -372,15 +370,6 @@ def main():
         results.append(wait_until(
             "dry-run node E logs planned writes but its sensor stays unchanged",
             lambda: "[dry run] would store slot 0" in c.log("node-e") and c.slots("node-e") == {9: "grace"}, 60))
-
-        print("== Scenario 1b: sensor self test (buffers only)")
-        c.cmd("node-a", "self_test 0 1")
-        results.append(wait_until(
-            "self test: template round trip through the host is byte-identical",
-            lambda: "SELF TEST 1: Match (no download)" in c.log("node-a")
-            and len(re.findall(r"round trip BYTE-IDENTICAL", c.log("node-a"))) == 3
-            and "SELF TEST 5: slot 0 vs slot 1" in c.log("node-a")
-            and "-- self test finished" in c.log("node-a"), 60))
 
         print("== Scenario 2: node A becomes the reference (resolve_all_conflicts keep_local)")
         c.cmd("node-a", "resolve_all 1")

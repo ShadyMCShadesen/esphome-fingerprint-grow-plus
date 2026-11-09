@@ -29,7 +29,6 @@ CONF_SLOT = "slot"
 CONF_SLOTS = "slots"
 CONF_CODE = "code"
 CONF_KEEP_LOCAL = "keep_local"
-CONF_COMPARE_SLOT = "compare_slot"
 
 # general
 CONF_ENROLL_SLOTS = "enroll_slots"
@@ -580,24 +579,6 @@ _action(
         key=CONF_DURATION,
     ),
     automation.ApplyField(CONF_DURATION, "allow_full_backup", cg.uint32),
-)
-
-# --- diagnostics -----------------------------------------------------------------------
-
-_action(
-    "self_test",
-    cv.maybe_simple_value(
-        {
-            _PARENT: _PARENT_ID,
-            cv.Optional(CONF_SLOT, default=0): _SLOT,
-            # 65535 = none; otherwise also score this slot against compare_slot
-            cv.Optional(CONF_COMPARE_SLOT, default=65535): _SLOT,
-        },
-        key=CONF_SLOT,
-    ),
-    automation.ApplyCall(
-        "self_test({}, {})", ((CONF_SLOT, cg.uint16), (CONF_COMPARE_SLOT, cg.uint16))
-    ),
 )
 
 # --- conditions ------------------------------------------------------------------------

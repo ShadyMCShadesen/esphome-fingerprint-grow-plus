@@ -15,7 +15,6 @@ static constexpr uint8_t PID_DATA = 0x02;
 static constexpr uint8_t PID_ACK = 0x07;
 static constexpr uint8_t PID_END_DATA = 0x08;
 
-static constexpr uint8_t CMD_MATCH = 0x03;
 static constexpr uint8_t CMD_STORE = 0x06;
 static constexpr uint8_t CMD_LOAD_CHAR = 0x07;
 static constexpr uint8_t CMD_UP_CHAR = 0x08;
@@ -29,8 +28,6 @@ static constexpr uint8_t CMD_READ_INDEX_TABLE = 0x1F;
 
 static const char *command_name(uint8_t cmd) {
   switch (cmd) {
-    case CMD_MATCH:
-      return "Match";
     case CMD_STORE:
       return "Store";
     case CMD_LOAD_CHAR:
@@ -80,7 +77,6 @@ void GrowLink::send_packet_(uint8_t pid, const uint8_t *payload, size_t len) {
   if (len > 0)
     this->uart_->write_array(payload, len);
   this->uart_->write_array(trailer, sizeof(trailer));
-  this->bytes_moved_ += sizeof(header) + len + 2;
 }
 
 bool GrowLink::read_byte_(uint8_t &byte, uint32_t deadline) {
@@ -135,7 +131,6 @@ uint8_t GrowLink::receive_packet_(uint8_t &pid, std::vector<uint8_t> &payload, u
   uint8_t sum_hi, sum_lo;
   if (!this->read_byte_(sum_hi, deadline) || !this->read_byte_(sum_lo, deadline))
     return GROW_TIMEOUT;
-  this->bytes_moved_ += 9 + length;
   if ((((uint16_t) sum_hi << 8) | sum_lo) != sum) {
     ESP_LOGW(TAG, "Checksum mismatch in packet from sensor");
     return GROW_BAD_PACKET;
@@ -242,7 +237,6 @@ uint8_t GrowLink::up_char(uint8_t buffer, std::vector<uint8_t> &out) {
   }
   if (!payload.empty())
     memset(payload.data(), 0, payload.size());
-  this->last_template_size_ = out.size();
   if (res != GROW_OK) {
     if (!out.empty())
       memset(out.data(), 0, out.size());
@@ -252,10 +246,11 @@ uint8_t GrowLink::up_char(uint8_t buffer, std::vector<uint8_t> &out) {
 }
 
 uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data) {
-  return this->down_char(buffer, data, this->packet_gap_ms_, 50);
-}
-
-uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data, uint8_t gap_ms, uint16_t settle_ms) {
+  // Observed on a real R503: without a pause between DownChar data packets the template arrives
+  // corrupted; 10 ms and 40 ms both work byte-identically. Afterwards the line is watched for a
+  // short time and anything the module sends on its own is logged and discarded.
+  static constexpr uint8_t gap_ms = 10;
+  static constexpr uint16_t settle_ms = 50;
   if (data.empty() || data.size() > MAX_TEMPLATE_SIZE)
     return GROW_BAD_PACKET;
   const uint8_t cmd[] = {CMD_DOWN_CHAR, buffer};
@@ -264,7 +259,6 @@ uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data, ui
   if (res != GROW_OK)
     return res;
   this->last_step_ = "DownChar data";
-  this->last_template_size_ = data.size();
   size_t pos = 0;
   size_t packets = 0;
   const size_t chunk = this->packet_size_;
@@ -306,11 +300,6 @@ uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data, ui
   return GROW_OK;
 }
 
-bool GrowLink::ping() {
-  uint16_t count;
-  return this->template_count(count) == GROW_OK;
-}
-
 uint8_t GrowLink::store(uint8_t buffer, uint16_t slot) {
   const uint8_t cmd[] = {CMD_STORE, buffer, (uint8_t) (slot >> 8), (uint8_t) slot};
   std::vector<uint8_t> ack;
@@ -322,14 +311,6 @@ uint8_t GrowLink::delete_char(uint16_t slot, uint16_t count) {
                          (uint8_t) count};
   std::vector<uint8_t> ack;
   return this->command_(cmd, sizeof(cmd), ack, 2000);
-}
-
-uint8_t GrowLink::match(uint16_t &score, uint32_t timeout_ms) {
-  const uint8_t cmd[] = {CMD_MATCH};
-  std::vector<uint8_t> ack;
-  uint8_t res = this->command_(cmd, sizeof(cmd), ack, timeout_ms);
-  score = ack.size() >= 3 ? (((uint16_t) ack[1] << 8) | ack[2]) : 0;
-  return res;
 }
 
 uint8_t GrowLink::read_notepad(uint8_t page, uint8_t out[32]) {

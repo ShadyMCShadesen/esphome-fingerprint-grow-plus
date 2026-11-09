@@ -57,35 +57,22 @@ class GrowLink {
   uint8_t load_char(uint8_t buffer, uint16_t slot);
   /// Upload CharBuffer `buffer` to the host (UpChar).
   uint8_t up_char(uint8_t buffer, std::vector<uint8_t> &out);
-  /// Download `data` into CharBuffer `buffer` (DownChar). `gap_ms` pauses between data
-  /// packets; afterwards the line is watched for `settle_ms` and anything the module sends
-  /// on its own is logged and discarded.
+  /// Download `data` into CharBuffer `buffer` (DownChar).
   uint8_t down_char(uint8_t buffer, const std::vector<uint8_t> &data);
-  uint8_t down_char(uint8_t buffer, const std::vector<uint8_t> &data, uint8_t gap_ms, uint16_t settle_ms);
-  void set_packet_gap_ms(uint8_t gap_ms) { this->packet_gap_ms_ = gap_ms; }
-  /// Plain liveness check (TempleteNum); true if the module answers at all.
-  bool ping();
   /// Raw ReadSysPara answer (16 parameter bytes) of the last read_params() call.
   const uint8_t *last_params_raw() const { return this->last_params_raw_; }
   uint8_t store(uint8_t buffer, uint16_t slot);
   uint8_t delete_char(uint16_t slot, uint16_t count);
-  /// Compare CharBuffer1 with CharBuffer2. GROW_OK means "same finger".
-  uint8_t match(uint16_t &score, uint32_t timeout_ms = 3000);
   uint8_t read_notepad(uint8_t page, uint8_t out[32]);
   uint8_t write_notepad(uint8_t page, const uint8_t data[32]);
 
   /// Convenience: LoadChar + UpChar.
   uint8_t read_template(uint16_t slot, std::vector<uint8_t> &out, uint8_t buffer = 1);
 
-  uint16_t packet_size() const { return this->packet_size_; }
-  /// Sum of all bytes moved since boot (diagnostics only).
-  uint32_t bytes_moved() const { return this->bytes_moved_; }
   /// Diagnostics for the most recent failure: the step that failed and how many bytes of the
   /// (incomplete) answer had arrived. 0 bytes means the module did not answer at all.
   const char *last_step() const { return this->last_step_; }
   size_t last_rx_bytes() const { return this->last_rx_bytes_; }
-  /// Size of the last template moved by UpChar/DownChar (no content, diagnostics only).
-  size_t last_template_size() const { return this->last_template_size_; }
 
  protected:
   void drain_();
@@ -100,13 +87,8 @@ class GrowLink {
   /// Module address in every packet; fingerprint_grow always uses the default 0xFFFFFFFF.
   static constexpr uint32_t ADDRESS{0xFFFFFFFF};
   uint16_t packet_size_{128};
-  uint32_t bytes_moved_{0};
   const char *last_step_{""};
   size_t last_rx_bytes_{0};
-  size_t last_template_size_{0};
-  // Observed on a real R503: without a pause between DownChar data packets the template
-  // arrives corrupted (match score 0); 10 ms and 40 ms both work.
-  uint8_t packet_gap_ms_{10};
   uint8_t last_params_raw_[16]{};
 };
 

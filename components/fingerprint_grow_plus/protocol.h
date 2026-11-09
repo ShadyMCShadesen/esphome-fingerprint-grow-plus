@@ -119,7 +119,6 @@ class MsgReader {
     return p;
   }
   bool ok() const { return this->ok_; }
-  bool at_end() const { return this->pos_ == this->len_; }
 
  protected:
   bool bad_() {

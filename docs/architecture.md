@@ -22,7 +22,7 @@ no socket is opened and the sync rounds below only re-read the local index.
 The official class is `final` and its protocol helpers are `protected`, so it can be neither
 subclassed nor reused. `fingerprint_grow_plus` therefore has its own small driver (`GrowLink`) for the
 template commands of the R503 manual (`LoadChar`, `UpChar`, `DownChar`, `Store`, `DeletChar`,
-`Match` (diagnostics only), `ReadSysPara`, `TempleteNum`, `ReadIndexTable`, `ReadNotepad`, `WriteNotepad`).
+`ReadSysPara`, `TempleteNum`, `ReadIndexTable`, `ReadNotepad`, `WriteNotepad`).
 `SetPwd` and `SetSysPara` are not implemented: the sensor password and parameters are never changed.
 
 ### Sharing the UART safely

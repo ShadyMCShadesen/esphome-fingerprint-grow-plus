@@ -355,8 +355,6 @@ void FingerprintGrowPlusComponent::run_next_job_() {
       this->save_queued_ = false;
       this->job_save_meta_();
       break;
-    case JobType::SELF_TEST:
-      this->job_self_test_(job);
       break;
   }
   if (!job.data.empty())
@@ -757,20 +755,6 @@ void FingerprintGrowPlusComponent::job_count_() {
     this->count_sensor_->publish_state(count);
 }
 
-void FingerprintGrowPlusComponent::self_test(uint16_t slot, uint16_t compare_slot) {
-  ESP_LOGI(TAG, "Self test on slot %u queued (only sensor buffers are used, no slot is written)", slot);
-  for (uint8_t variant = 1; variant <= 5; variant++) {
-    if (variant == 5 && compare_slot == NO_SLOT)
-      break;
-    Job job;
-    job.type = JobType::SELF_TEST;
-    job.slot = slot;
-    job.meta = compare_slot;
-    job.flags = variant;
-    this->queue_job_(std::move(job));
-  }
-}
-
 void FingerprintGrowPlusComponent::claim_all_slots() {
   if (!this->indexed_once_) {
     ESP_LOGW(TAG, "claim_all_slots refused: index not ready yet");
@@ -801,65 +785,6 @@ void FingerprintGrowPlusComponent::resolve_all_conflicts(bool keep_local) {
     }
   }
   ESP_LOGI(TAG, "%u conflict(s) resolved (%s)", n, keep_local ? "this node's fingers win" : "peers' fingers win");
-}
-
-void FingerprintGrowPlusComponent::job_self_test_(Job &job) {
-  const uint16_t slot = job.slot;
-  const uint8_t variant = job.flags;
-  auto report = [this, variant](const char *step, uint8_t res) {
-    ESP_LOGI(TAG, "SELF TEST %u: %-28s -> 0x%02X (%u answer bytes)", variant, step, res,
-             (unsigned) this->link_.last_rx_bytes());
-  };
-  uint16_t score = 0;
-  uint8_t res;
-  if (variant == 5) {
-    // Two different slots: how does the module score two (presumably) different fingers?
-    res = this->link_.load_char(1, slot);
-    report("LoadChar buffer 1", res);
-    res = this->link_.load_char(2, job.meta);
-    report("LoadChar buffer 2 (compare slot)", res);
-    res = this->link_.match(score, 5000);
-    report("Match slot vs compare slot", res);
-    ESP_LOGI(TAG, "SELF TEST 5: slot %u vs slot %u: match score %u -- self test finished", slot, job.meta, score);
-    return;
-  }
-  if (variant == 1) {
-    // Match without any download: is Match supported and how fast?
-    res = this->link_.load_char(1, slot);
-    report("LoadChar buffer 1", res);
-    res = this->link_.load_char(2, slot);
-    report("LoadChar buffer 2", res);
-    uint32_t start = millis();
-    res = this->link_.match(score, 5000);
-    report("Match (no download)", res);
-    ESP_LOGI(TAG, "SELF TEST 1: match score %u after %" PRIu32 " ms", score, millis() - start);
-    return;
-  }
-  // Variants 2-4: round trip of the slot's own template through the host.
-  static const uint8_t GAPS[] = {0, 0, 0, 10, 40};
-  const uint8_t gap = GAPS[variant];
-  std::vector<uint8_t> data;
-  res = this->link_.read_template(slot, data, 1);
-  report("LoadChar+UpChar buffer 1", res);
-  if (res != GROW_OK)
-    return;
-  ESP_LOGI(TAG, "SELF TEST %u: template %u bytes, packet size %u, packet gap %u ms", variant,
-           (unsigned) data.size(), this->link_.packet_size(), gap);
-  res = this->link_.down_char(2, data, gap, 300);
-  report("DownChar buffer 2", res);
-  std::vector<uint8_t> back;
-  res = this->link_.up_char(2, back);
-  report("UpChar buffer 2", res);
-  size_t diff = 0;
-  for (size_t i = 0; i < data.size() && i < back.size(); i++)
-    diff += data[i] != back[i] ? 1 : 0;
-  bool identical = res == GROW_OK && back.size() == data.size() && diff == 0;
-  ESP_LOGI(TAG, "SELF TEST %u: round trip %s (%u of %u bytes differ, %u bytes back)%s", variant,
-           identical ? "BYTE-IDENTICAL" : "DIFFERENT", (unsigned) diff, (unsigned) data.size(),
-           (unsigned) back.size(), (variant == 4 && job.meta == NO_SLOT) ? " -- self test finished" : "");
-  crypto::wipe(data.data(), data.size());
-  if (!back.empty())
-    crypto::wipe(back.data(), back.size());
 }
 
 void FingerprintGrowPlusComponent::job_save_meta_() {

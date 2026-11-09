@@ -53,7 +53,6 @@ enum class JobType : uint8_t {
   DELETE,
   COUNT,
   SAVE_META,
-  SELF_TEST,
 };
 
 enum JobFlag : uint8_t {
@@ -213,9 +212,6 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void allow_restore(uint32_t seconds);
   /// Also hand out local-only slots (outside the synced range) to the backup tool for `seconds`.
   void allow_full_backup(uint32_t seconds);
-  /// Diagnostic: exercise LoadChar/UpChar/DownChar/Match on `slot` using only the sensor's
-  /// character buffers (no slot is written) and log every step.
-  void self_test(uint16_t slot, uint16_t compare_slot = NO_SLOT);
   /// Make this node the reference for every managed slot it holds: all of them get a new
   /// forced version and replace the peers' templates in these slots (initial rollout).
   void claim_all_slots();
@@ -283,7 +279,6 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void job_delete_(Job &job);
   void job_count_();
   void job_save_meta_();
-  void job_self_test_(Job &job);
   bool store_verified_(uint8_t buffer, uint16_t slot, const std::vector<uint8_t> &data);
   void apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires);
 
