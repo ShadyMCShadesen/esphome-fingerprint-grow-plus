@@ -114,7 +114,6 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
     this->network_ = true;
   }
   void set_port(uint16_t port) { this->transport_.set_port(port); }
-  void set_sensor_address(uint32_t address) { this->link_.set_address(address); }
   void add_peer(const char *host, uint16_t port) { this->peers_.push_back(Peer{host, port}); }
   void add_include_range(uint16_t from, uint16_t to) { this->include_.push_back(SlotRange{from, to}); }
   void add_exclude_range(uint16_t from, uint16_t to) { this->exclude_.push_back(SlotRange{from, to}); }

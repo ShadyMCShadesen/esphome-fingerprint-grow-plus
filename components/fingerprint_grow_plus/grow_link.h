@@ -50,7 +50,6 @@ class GrowLink {
   static constexpr size_t MAX_TEMPLATE_SIZE = 2048;
 
   void set_uart(uart::UARTDevice *uart) { this->uart_ = uart; }
-  void set_address(uint32_t address) { this->address_ = address; }
 
   uint8_t read_params(GrowParams &params);
   uint8_t read_index_page(uint8_t page, uint8_t out[32]);
@@ -98,7 +97,8 @@ class GrowLink {
   uint8_t command_(const uint8_t *cmd, size_t len, std::vector<uint8_t> &ack, uint32_t timeout_ms = 1000);
 
   uart::UARTDevice *uart_{nullptr};
-  uint32_t address_{0xFFFFFFFF};
+  /// Module address in every packet; fingerprint_grow always uses the default 0xFFFFFFFF.
+  static constexpr uint32_t ADDRESS{0xFFFFFFFF};
   uint16_t packet_size_{128};
   uint32_t bytes_moved_{0};
   const char *last_step_{""};

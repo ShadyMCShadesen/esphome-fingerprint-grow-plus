@@ -65,10 +65,10 @@ void GrowLink::drain_() {
 void GrowLink::send_packet_(uint8_t pid, const uint8_t *payload, size_t len) {
   uint8_t header[9] = {0xEF,
                        0x01,
-                       (uint8_t) (this->address_ >> 24),
-                       (uint8_t) (this->address_ >> 16),
-                       (uint8_t) (this->address_ >> 8),
-                       (uint8_t) this->address_,
+                       (uint8_t) (ADDRESS >> 24),
+                       (uint8_t) (ADDRESS >> 16),
+                       (uint8_t) (ADDRESS >> 8),
+                       (uint8_t) ADDRESS,
                        pid,
                        (uint8_t) ((len + 2) >> 8),
                        (uint8_t) (len + 2)};
@@ -102,10 +102,10 @@ uint8_t GrowLink::receive_packet_(uint8_t &pid, std::vector<uint8_t> &payload, u
   this->last_rx_bytes_ = 0;
   const uint8_t expected[6] = {0xEF,
                                0x01,
-                               (uint8_t) (this->address_ >> 24),
-                               (uint8_t) (this->address_ >> 16),
-                               (uint8_t) (this->address_ >> 8),
-                               (uint8_t) this->address_};
+                               (uint8_t) (ADDRESS >> 24),
+                               (uint8_t) (ADDRESS >> 16),
+                               (uint8_t) (ADDRESS >> 8),
+                               (uint8_t) ADDRESS};
   uint8_t byte;
   size_t idx = 0;
   // Synchronise on header + address.

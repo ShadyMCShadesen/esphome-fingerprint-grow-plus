@@ -39,7 +39,6 @@ CONF_DELETE_ALL_CODE = "delete_all_code"
 CONF_FINGER_SENSOR = "finger_sensor"
 CONF_FINGERPRINT_COUNT_SENSOR = "fingerprint_count_sensor"
 CONF_FINGERPRINT_CAPACITY_SENSOR = "fingerprint_capacity_sensor"
-CONF_SENSOR_ADDRESS = "sensor_address"
 CONF_ON_SLOT_UPDATED = "on_slot_updated"
 CONF_ON_SLOT_DELETED = "on_slot_deleted"
 CONF_ON_ENROLL_STARTED = "on_enroll_started"
@@ -303,7 +302,6 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_FINGERPRINT_CAPACITY_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_STARTUP_DELAY, default="10s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_METADATA_STORAGE): cv.enum(METADATA_STORAGE, lower=True),
-            cv.Optional(CONF_SENSOR_ADDRESS, default=0xFFFFFFFF): cv.hex_uint32_t,
             cv.Optional(CONF_ADMIN): ADMIN_SCHEMA,
             cv.Optional(CONF_GUESTS): GUESTS_SCHEMA,
             cv.Optional(CONF_SYNC): SYNC_SCHEMA,
@@ -377,7 +375,6 @@ async def to_code(config):
     await uart.register_uart_device(var, config)
 
     cg.add(var.set_fingerprint_grow(await cg.get_variable(config[CONF_FINGERPRINT_GROW_ID])))
-    cg.add(var.set_sensor_address(config[CONF_SENSOR_ADDRESS]))
     cg.add(var.set_startup_delay(config[CONF_STARTUP_DELAY]))
     cg.add(var.set_meta_backend(METADATA_STORAGE[str(config[CONF_METADATA_STORAGE])]))
     if CONF_ENROLL_SLOTS in config:

@@ -251,7 +251,6 @@ fingerprint_grow_plus:
   fingerprint_capacity_sensor: fingerprint_capacity      # cross-check of the capacity
   startup_delay: 10s                  # first sensor access after boot
   metadata_storage: preferences       # ESP32 default; ESP8266: sensor_notepad
-  sensor_address: 0xFFFFFFFF
   uart_id: uart_sensor                # only with several UARTs
   fingerprint_grow_id: grow           # only with several fingerprint_grow
   on_enroll_started: []               # slot
