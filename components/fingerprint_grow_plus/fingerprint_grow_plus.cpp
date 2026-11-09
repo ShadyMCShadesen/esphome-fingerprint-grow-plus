@@ -100,38 +100,38 @@ void FingerprintGrowPlusComponent::setup() {
 void FingerprintGrowPlusComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Fingerprint Grow Plus:");
   ESP_LOGCONFIG(TAG, "  Node: %s (id %08" PRIX32 ")", App.get_name().c_str(), this->node_id_);
-  if (this->network_) {
-    this->transport_.dump_config();
-  } else {
-    ESP_LOGCONFIG(TAG, "  Network sync: off (no key configured), local features only");
-  }
-  for (const auto &peer : this->peers_) {
-    ESP_LOGCONFIG(TAG, "  Peer: %s:%u%s", peer.host, peer.port, this->is_self_(peer) ? " (this node, skipped)" : "");
-  }
-  for (const auto &r : this->include_)
-    ESP_LOGCONFIG(TAG, "  Include slots: %u-%u", r.from, r.to);
-  for (const auto &r : this->exclude_)
-    ESP_LOGCONFIG(TAG, "  Exclude slots: %u-%u", r.from, r.to);
-  ESP_LOGCONFIG(TAG, "  Sync interval: %" PRIu32 " s", this->sync_interval_ms_ / 1000);
   ESP_LOGCONFIG(TAG, "  Metadata storage: %s", this->storage_ ? this->storage_->name() : "?");
-  if (this->dry_run_)
-    ESP_LOGCONFIG(TAG, "  DRY RUN: nothing is written to or deleted from the sensor by the sync");
-  for (uint16_t slot : this->admin_slots_)
-    ESP_LOGCONFIG(TAG, "  Admin finger: slot %u (protected)", slot);
-  if (this->admin_enabled_)
-    ESP_LOGCONFIG(TAG,
-                  "  Admin gestures: enroll %u, delete %u, re-enroll %u, guest %u touches; hold %" PRIu32
-                  " ms",
+  if (this->finger_sensor_ == nullptr)
+    ESP_LOGCONFIG(TAG, "  No finger_sensor: admin gestures end 'window' after the last match, no hold");
+  if (this->admin_enabled_) {
+    ESP_LOGCONFIG(TAG, "  Admin:");
+    for (uint16_t slot : this->admin_slots_)
+      ESP_LOGCONFIG(TAG, "    Admin finger: slot %u (protected)", slot);
+    ESP_LOGCONFIG(TAG, "    Gestures: enroll %u, delete %u, re-enroll %u, guest %u touches (0 = off); hold %" PRIu32 " ms",
                   this->enroll_touches_, this->delete_touches_, this->reenroll_touches_, this->guest_touches_,
                   this->hold_ms_);
-  if (this->admin_enabled_ && this->admin_access_ != 0)
-    ESP_LOGCONFIG(TAG, "  Admin single touch: access (%s)", this->admin_access_ == 1 ? "immediate" : "delayed");
+    if (this->admin_access_ != 0)
+      ESP_LOGCONFIG(TAG, "    Single touch: access (%s)", this->admin_access_ == 1 ? "immediate" : "delayed");
+  }
   if (this->guests_enabled_)
-    ESP_LOGCONFIG(TAG, "  Guest slots: %u-%u, default validity %" PRIu32 " h%s", this->guest_from_, this->guest_to_,
+    ESP_LOGCONFIG(TAG, "  Guests: slots %u-%u, default validity %" PRIu32 " h%s", this->guest_from_, this->guest_to_,
                   this->guest_valid_s_ / 3600,
                   this->backend_ == MetaBackend::NOTEPAD ? " (expiry not persisted with the notepad)" : "");
-  if (this->finger_sensor_ == nullptr)
-    ESP_LOGCONFIG(TAG, "  No finger sensor configured: sync jobs only wait for the scan hold-off");
+  if (!this->network_) {
+    ESP_LOGCONFIG(TAG, "  Sync: off (no sync: block), local features only");
+    return;
+  }
+  ESP_LOGCONFIG(TAG, "  Sync:");
+  this->transport_.dump_config();
+  for (const auto &peer : this->peers_)
+    ESP_LOGCONFIG(TAG, "    Peer: %s:%u%s", peer.host, peer.port, this->is_self_(peer) ? " (this node, skipped)" : "");
+  for (const auto &r : this->include_)
+    ESP_LOGCONFIG(TAG, "    Synced slots: %u-%u", r.from, r.to);
+  for (const auto &r : this->exclude_)
+    ESP_LOGCONFIG(TAG, "    Not synced: %u-%u", r.from, r.to);
+  ESP_LOGCONFIG(TAG, "    Interval: %" PRIu32 " s", this->sync_interval_ms_ / 1000);
+  if (this->dry_run_)
+    ESP_LOGCONFIG(TAG, "    DRY RUN: the sync writes and deletes nothing on this sensor");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -368,14 +368,17 @@ void FingerprintGrowPlusComponent::finish_indexing_if_done_() {
     return;
   this->ready_ = true;
   this->indexed_once_ = true;
-  uint16_t present = 0;
-  for (uint16_t s = 0; s < this->capacity_; s++)
-    present += (this->managed_(s) && meta_present(this->meta_[s])) ? 1 : 0;
+  uint16_t present = 0, synced = 0;
+  for (uint16_t s = 0; s < this->capacity_; s++) {
+    present += this->local_present_[s] ? 1 : 0;
+    synced += (this->managed_(s) && meta_present(this->meta_[s])) ? 1 : 0;
+  }
   if (this->round_active_) {
-    ESP_LOGD(TAG, "Index refreshed: %u managed templates, clock %u", present, this->clock_);
+    ESP_LOGD(TAG, "Index refreshed: %u templates (%u synced), clock %u", present, synced, this->clock_);
     return;
   }
-  ESP_LOGI(TAG, "Index ready: %u managed templates, capacity %u, clock %u", present, this->capacity_, this->clock_);
+  ESP_LOGI(TAG, "Index ready: %u templates (%u synced), capacity %u, clock %u", present, synced, this->capacity_,
+           this->clock_);
   this->set_status_(this->dry_run_ ? "idle (dry run)" : "idle");
   if (!this->round_requested_)
     this->request_round_(1000);
@@ -970,7 +973,7 @@ void FingerprintGrowPlusComponent::resolve_conflict(uint16_t slot, bool keep_loc
 
 void FingerprintGrowPlusComponent::allow_restore(uint32_t seconds) {
   if (!this->network_) {
-    ESP_LOGW(TAG, "allow_restore: no key configured, restore over the network is not possible");
+    ESP_LOGW(TAG, "allow_restore: needs the sync: block (restore runs over the network)");
     return;
   }
   this->restore_until_ms_ = millis() + seconds * 1000;

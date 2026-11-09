@@ -55,8 +55,7 @@ tampered record aborts the session.
 - `expires` = unix time after which a guest finger is deleted, 0 = never. It belongs to the slot
   version: a node adopting a version adopts its expiry.
 
-Version history: 1 = initial; 2 = `expires` added to MANIFEST, TEMPLATE and RESTORE;
-3 = magic `FGP` and HKDF salt `growplus-v1` (rename to `fingerprint_grow_plus`), messages unchanged.
+Version 3 is the first published version (1 and 2 were development versions).
 
 ### Session flow
 

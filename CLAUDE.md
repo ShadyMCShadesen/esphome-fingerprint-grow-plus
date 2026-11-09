@@ -1,9 +1,9 @@
 # CLAUDE.md – project context
 
-ESPHome external component `fingerprint_grow_plus` (formerly `fingerprint_sync`): extensions for
-`fingerprint_grow` (GROW R503/R30x): admin fingers with gestures, guest fingers with expiry,
-protected slots, and optional template sync directly between ESPHome nodes (no Home Assistant,
-no broker, no cloud). Without `key` a node runs stand-alone (no network port).
+ESPHome external component `fingerprint_grow_plus`: extensions for `fingerprint_grow`
+(GROW R503/R30x): admin fingers with gestures (`admin:`), guest fingers with expiry (`guests:`),
+protected slots, and optional template sync directly between ESPHome nodes (`sync:`; no Home
+Assistant, no broker, no cloud). Without `sync:` a node runs stand-alone (no network port).
 
 ## Layout
 - `components/fingerprint_grow_plus/` – the component
@@ -12,7 +12,9 @@ no broker, no cloud). Without `key` a node runs stand-alone (no network port).
   - `transport.h`, `tcp_transport.*` transport abstraction (TCP via ESPHome socket helpers)
   - `protocol.h` messages and slot metadata encoding; `meta_storage.*` persistence
   - `fingerprint_grow_plus.*` job queue, sync decisions, sessions, rounds
-  - `__init__.py`, `sensor.py`, `text_sensor.py`, `binary_sensor.py` codegen
+  - `admin.cpp` admin gestures, protected slots, guests and expiry
+  - `__init__.py` (schema: general options + `admin:` / `guests:` / `sync:` blocks, actions),
+    `sensor.py`, `text_sensor.py`, `binary_sensor.py` codegen
 - `tools/growplus.py` backup/restore/status CLI (stdlib only, must stay byte-compatible)
 - `tests/` unit tests (`run_unit_tests.sh`), simulator (`sim/`), end-to-end (`e2e/run_e2e.py`)
 - `examples/` generic, invented example configs; `docs/` documentation (German guide in `docs/de/`)
@@ -22,6 +24,7 @@ no broker, no cloud). Without `key` a node runs stand-alone (no network port).
 - Sensor access only in jobs, max one job per `loop()`, never split a sensor transaction across
   loops; no jobs during enrollment, while a finger is on the sensor, or 1.5 s after scan activity.
 - Anti-entropy with per-slot Lamport versions + tombstones; absence is never deletion.
+- `sync: include_slots/exclude_slots` only limit the sync; local features use all slots.
 - Different finger in the same slot => conflict, never overwrite (unless explicitly forced).
 - Never implement SetPwd/SetSysPara. Never log template bytes.
 - Target the current ESPHome release (new automation API: `register_apply_action`,

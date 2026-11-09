@@ -2,12 +2,14 @@
 """growplus - backup, restore and inspection tool for fingerprint_grow_plus nodes.
 
 Standard library only. Speaks the same authenticated, encrypted protocol as the nodes
-(see docs/protocol.md) and therefore needs the shared key.
+(see docs/protocol.md) and therefore needs the shared key and a node with a `sync:` block.
+Only synced slots are covered; local-only slots (outside include_slots) are not.
 
 Commands
   genkey                                   print a new random key for secrets.yaml
-  status  --host H                         list the slots a node manages (no template data)
-  backup  --host H --out FILE              download all managed templates into an encrypted file
+  status  --host H                         list the synced slots of a node (no template data)
+  backup  --host H [--out FILE]            download all synced templates into an encrypted file
+                                           (default name: <host>-<date>_<time>.fgpb)
   restore --host H --in FILE [--slots ..]  upload templates (node must run allow_restore first)
   inspect --in FILE                        list the content of a backup file
 

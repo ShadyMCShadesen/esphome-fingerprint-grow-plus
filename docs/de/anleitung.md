@@ -1,29 +1,118 @@
-# Kurzanleitung (Deutsch)
+# Anleitung (Deutsch)
 
-`fingerprint_grow_plus` erweitert `fingerprint_grow` (GROW-Sensor R503 u. a.) um Admin-Finger mit
-Gesten, Gästefinger mit Ablaufdatum und geschützte Slots. **Optional** überträgt es die
-Fingerabdrücke direkt zwischen ESPHome-Geräten: Ein Finger wird einmal an einem beliebigen Gerät
-eingelernt und liegt danach auf allen Geräten **im gleichen Slot**. Home Assistant, MQTT oder
-Cloud werden dafür nicht benötigt.
+`fingerprint_grow_plus` erweitert ESPHome-`fingerprint_grow` (GROW-Sensor R503 u. a.), ganz ohne
+Home Assistant:
 
-**Ohne Sync (ein Gerät):** `key` und `peers` weglassen. Dann öffnet das Gerät keinen Port, und
-Admin-Finger, Gäste und Einlernen per Knopf funktionieren nur lokal:
+- **Admin-Finger** bedienen den Sensor: neue Finger einlernen, einen Finger löschen oder neu
+  einlernen, indem man ihn zeigt, Statusfarbe anzeigen.
+- **Gästefinger** laufen nach einer festen Zeit ab und werden automatisch gelöscht.
+- **Geschützte Slots**: Admin-Finger lassen sich nicht versehentlich löschen.
+- **Sync** *(optional)*: mehrere ESPHome-Geräte haben dieselben Finger in denselben Slots. Einmal
+  einlernen, überall öffnen. Die Geräte sprechen direkt und verschlüsselt miteinander.
+
+Jeder Teil wird über einen eigenen Block in der YAML eingeschaltet: `admin:`, `guests:`, `sync:`.
+Ohne `sync:` verlässt nichts das Gerät, und es wird kein Netzwerk-Port geöffnet.
+
+## Ein Gerät (ohne Sync)
+
+```yaml
+external_components:
+  - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@main
+    components: [fingerprint_grow_plus]
+
+fingerprint_grow_plus:
+  finger_sensor: finger_detected   # binary_sensor am Touch-Pin (Wake-up) des Sensors
+  admin:                           # Admin-Finger in Slot 0
+```
+
+1. Den Admin-Finger einmal in Slot 0 einlernen (z. B. mit `fingerprint_grow.enroll`).
+2. Zweimal auflegen, abheben, 2 s warten: Der nächste freie Slot wird eingelernt.
+3. Admin-Finger aus der Tür-Aktion heraushalten (siehe [Admin-Finger](#admin-finger)).
+
+Vollständiges Beispiel: `examples/standalone.yaml`.
+
+## Admin-Finger
 
 ```yaml
 fingerprint_grow_plus:
   finger_sensor: finger_detected
-  admin:              # Admin-Finger in Slot 0
+  admin:
+    slots: [0, 1]        # Standard: [0]
 ```
 
-**Umbenennung:** Früher hieß die Komponente `fingerprint_sync`. In bestehenden YAMLs
-`fingerprint_sync` durch `fingerprint_grow_plus` ersetzen (Block, Aktionen, Bedingungen,
-Sensor-Plattformen) und die neue Repo-URL verwenden. Alle Stationen gemeinsam aktualisieren
-(Protokoll 3). Slot-Versionen und Ablaufdaten beginnen neu; alte `fpsync.py`-Backups kann
-`tools/growplus.py` nicht lesen, daher nach dem Update ein neues Backup ziehen.
+Auflegen, abheben, wieder auflegen … Die Geste ist fertig, wenn 2 s (`window`) kein Finger auf
+dem Sensor lag:
 
-## Einrichtung mit Sync
+| Admin-Finger | Wirkung |
+|---|---|
+| 2× | nächsten freien Slot einlernen |
+| 3×, dann Finger | dieser Finger wird gelöscht (mit Sync: auf allen Geräten) |
+| 4×, dann Finger | dieser Finger wird im selben Slot neu eingelernt |
+| 5× (nur mit `guests:`) | Gastfinger einlernen |
+| 3 s liegen lassen | `on_hold`: Statusfarbe anzeigen, siehe `health()` |
+| 1× (nur mit `access:`) | `on_access`: wie ein normaler Finger, siehe unten |
 
-1. Schlüssel erzeugen und in die `secrets.yaml` aller Geräte eintragen:
+Zeigt man statt des Zielfingers einen Admin-Finger oder 10 s lang gar keinen Finger, wird die
+Aktion abgebrochen.
+
+**Schutz:** Admin-Slots werden nie als freier Slot vergeben, lassen sich nicht per Geste oder
+`fingerprint_grow_plus.delete` löschen und bleiben bei `delete_all` stehen. Entfernen nur mit
+`fingerprint_grow_plus.delete_admin` und dem Lösch-Code. Mit Sync auf allen Geräten dieselben
+Admin-Slots eintragen.
+
+**Admin-Finger öffnen nichts**, solange man es nicht einstellt. `fingerprint_grow` meldet aber
+jeden Treffer, deshalb in der Tür-Aktion ausschließen:
+
+```yaml
+fingerprint_grow:
+  on_finger_scan_matched:
+    - if:
+        condition:
+          not:
+            or:
+              - fingerprint_grow_plus.is_admin_slot: !lambda return finger_id;
+              - fingerprint_grow_plus.is_admin_busy:
+        then:
+          - script.execute: tuer_oeffnen
+```
+
+**Admin-Finger, der auch öffnet** (`access:`): einmal auflegen löst `on_access` aus, zweimal oder
+öfter öffnet das Admin-Menü.
+
+```yaml
+fingerprint_grow_plus:
+  admin:
+    access: delayed      # oder immediate
+    on_access:           # Variablen: finger_id, confidence
+      - script.execute: tuer_oeffnen
+```
+
+- `delayed`: öffnet, sobald klar ist, dass es bei einmal blieb (etwa 2 s nach dem Abheben). Das
+  Admin-Menü öffnet nie die Tür.
+- `immediate`: öffnet sofort beim ersten Auflegen. Ein zweites Auflegen öffnet dann das Menü,
+  die Tür ist aber schon offen.
+
+**LED-Rückmeldung** kommt aus den Triggern `on_touch`, `on_gesture`, `on_waiting`, `on_cancelled`,
+`on_done`, `on_hold` (im `admin:`-Block) und `on_enroll_started`. Die Komponente steuert die LEDs
+nie selbst.
+
+## Gästefinger
+
+```yaml
+fingerprint_grow_plus:
+  time_id: sntp_time     # Pflicht: das Ablaufdatum braucht die echte Uhrzeit
+  guests: "150-179"      # 7 Tage gültig; oder {slots: "150-179", valid_for: 2d}
+```
+
+Einlernen mit der Admin-Geste 5× oder `fingerprint_grow_plus.enroll_guest`; verlängern mit
+`fingerprint_grow_plus.extend_guest`. Nach Ablauf wird der Finger gelöscht, mit Sync auf allen
+Geräten.
+
+## Sync
+
+### Einrichten
+
+1. Schlüssel einmal erzeugen und in die `secrets.yaml` eintragen (für alle Geräte derselbe):
 
    ```bash
    python3 tools/growplus.py genkey
@@ -34,93 +123,78 @@ Sensor-Plattformen) und die neue Repo-URL verwenden. Alle Stationen gemeinsam ak
    fingerprint_delete_all_code: "<langer Code>"
    ```
 
-2. Komponente einbinden, auf eine feste Version gepinnt:
+2. Auf jedem Gerät den `sync:`-Block ergänzen:
 
    ```yaml
-   external_components:
-     - source: github://ShadyMCShadesen/esphome-fingerprint-grow-plus@v0.1.0
-       components: [fingerprint_grow_plus]
-
    fingerprint_grow_plus:
-     key: !secret fingerprint_grow_plus_key
-     uart_id: <gleicher UART wie fingerprint_grow>
-     peers:
-       - <anderes-geraet>.local
-     dry_run: true
+     delete_all_code: !secret fingerprint_delete_all_code
+     sync:
+       key: !secret fingerprint_grow_plus_key
+       peers:                 # alle Geräte, überall dieselbe Liste; das eigene wird übersprungen
+         - geraet-1.local
+         - geraet-2.local
+       dry_run: true          # erster Lauf: nur protokollieren, nichts schreiben
    ```
 
-3. Erst mit `dry_run: true` flashen und die Logs prüfen. Dann von jedem Sensor ein Backup
-   ziehen (siehe unten) und erst danach `dry_run: false` setzen.
+3. Flashen und die Logs prüfen (`Sync with … finished`, `[dry run] would store slot …`,
+   eventuell `CONFLICT in slot …`). Von jedem Sensor ein Backup ziehen, dann `dry_run: false`.
 
-## Wichtige Regeln
+### Regeln
 
-- Ein Slot, der nur lokal fehlt (neuer Sensor, `fingerprint_grow.delete`), wird von den anderen
-  Geräten **wiederhergestellt**.
-- **Dauerhaft löschen** nur mit `fingerprint_grow_plus.delete`. Das wirkt auf allen Geräten.
-- `fingerprint_grow_plus.delete_all` braucht den Code und `confirm_cluster_wide: true`.
-- Unterschiedliche Finger im selben Slot werden **nie** überschrieben, sondern als Konflikt
+- Ein Finger hat auf allen Geräten **denselben Slot**.
+- **Löschen** mit `fingerprint_grow_plus.delete` (oder der 3×-Geste) wirkt auf allen Geräten.
+  Fehlt ein Finger nur auf einem Gerät (neuer Sensor, `fingerprint_grow.delete`), wird er von den
+  anderen zurückkopiert.
+- **Unterschiedliche Finger im selben Slot** werden nie überschrieben, sondern als Konflikt
   gemeldet (`on_conflict`, Sensor `conflict_count`). Auflösen mit
-  `fingerprint_grow_plus.resolve_conflict`:
-  - `keep_local: true`: dieser Finger gilt überall
-  - `keep_local: false`: den Finger der anderen übernehmen
-- Gerätebezogene Bereiche: `exclude_slots: ["180-199"]` hält diese Slots lokal.
+  `fingerprint_grow_plus.resolve_conflict`: `keep_local: true` = dieser Finger gilt überall,
+  `keep_local: false` = den Finger der anderen übernehmen.
+- **Nur einzelne Slots synchronisieren:** `include_slots` / `exclude_slots` bestimmen, was
+  synchronisiert wird. Alle anderen Slots bleiben lokal; Admin-Gesten, Gäste und `delete_all`
+  funktionieren dort trotzdem. Beispiel: ein Gerät an einem anderen Standort teilt nur den
+  Admin-Finger 99:
+
+  ```yaml
+  fingerprint_grow_plus:
+    admin:
+      slots: [99]
+    sync:
+      key: !secret fingerprint_grow_plus_key
+      peers: [192.168.10.21, 192.168.10.22]   # über VPN/Router kein mDNS: IP oder DNS-Name
+      include_slots: ["99"]
+  ```
+
+- Ausgefallene Geräte holen alles nach, sobald sie wieder da sind; verglichen wird nach jeder
+  Änderung und alle 15 min (`interval`).
 - Das Sensor-Passwort wird nie gesetzt oder geändert.
 
-## Erstinbetriebnahme mit bereits eingelernten Fingern
+### Erstinbetriebnahme mit bereits eingelernten Fingern
 
-Getrennt eingelernte Templates unterscheiden sich in den Bytes. Der R503 kann zwei gespeicherte
-Templates nicht zuverlässig als „gleicher Finger“ erkennen (sein Vergleichsbefehl liefert
-zufällige Ergebnisse). Deshalb meldet der Sync bei bestehenden Anlagen zunächst **Konflikte**. Das ist
-gewollt, denn es wird nie geraten.
+Getrennt eingelernte Finger unterscheiden sich Byte für Byte, und der R503 kann zwei gespeicherte
+Templates nicht zuverlässig als „gleicher Finger“ erkennen. Der Sync meldet deshalb Konflikte,
+statt zu raten. Einmalig auflösen:
 
-1. Von jedem Sensor ein Backup ziehen (siehe unten).
-2. Den Node mit der richtigen Zuordnung Finger → Slot als Referenz wählen.
-3. **Nur dort** `fingerprint_grow_plus.claim_all_slots` auslösen. Im `dry_run` zeigen die anderen
-   Nodes `[dry run] would REPLACE slot …`. Nur auf **einem** Node beanspruchen: Bei zwei
-   Referenzen gewinnt pro Slot die spätere.
+1. Von jedem Sensor ein Backup ziehen.
+2. Das Gerät mit der richtigen Zuordnung Finger → Slot als Referenz wählen.
+3. **Nur dort** `fingerprint_grow_plus.claim_all_slots` auslösen. Mit `dry_run` zeigen die anderen
+   Geräte `[dry run] would REPLACE slot …`.
 4. Passt alles, `dry_run: false` setzen.
 
-## Einlernen ohne Home Assistant
+### Netzwerk
 
-- **Taster:** `fingerprint_grow_plus.enroll_next_free` im `on_press` eines GPIO-Binary-Sensors.
-- **Weboberfläche:** Template-Buttons im `web_server` (siehe `examples/common-fingerprint-grow-plus.yaml`).
-- **Admin-Finger:** mit `admin:` (ohne Optionen: Slot 0) den Admin-Finger zweimal auflegen und
-  kurz warten. Danach wird der nächste freie Slot eingelernt. Für LED-Feedback gibt es den
-  Trigger `on_admin_touch`, siehe unten.
+Ein TCP-Port (Standard 18530), in beide Richtungen zwischen allen Geräten.
 
-## Admin-Finger
+- **Gleiches Netz:** `.local`-Namen funktionieren.
+- **Über VLAN, Router oder VPN:** IP-Adressen oder DNS-Namen verwenden, den Port in der Firewall
+  freigeben und am besten feste IP-Adressen vergeben.
+- `allowed_networks` beschränkt, aus welchen Netzen Verbindungen angenommen werden.
 
-Admin-Finger (`admin: slots: [0, 1]`) öffnen nichts, sie bedienen nur den Sync. Eine Geste ist
-eine Anzahl Berührungen, abgeschlossen durch eine Pause von 2 s ohne Finger auf dem Sensor
-(dafür `finger_sensor` konfigurieren):
-
-| Geste | Wirkung |
-|---|---|
-| 2× | nächsten freien Slot einlernen |
-| 3×, dann Finger | dieser Finger wird auf **allen** Stationen gelöscht |
-| 4×, dann Finger | dieser Finger wird im selben Slot neu eingelernt (überall ersetzt) |
-| halten (3 s) | Statusanzeige über `on_admin_hold` und `health()` |
-
-Mit `admin: access: delayed` wirkt der Admin-Finger bei **einmal** Auflegen wie ein normaler Finger
-(Trigger `on_admin_access`, z. B. Tür öffnen), sobald er 2 s nicht mehr aufliegt; zweimal oder
-öfter öffnet weiter das Admin-Menü, ohne die Tür zu öffnen. `access: immediate` löst sofort beim
-ersten Auflegen aus; ein zweites Auflegen öffnet dann zusätzlich das Menü.
-
-Admin-Finger sind geschützt: kein Löschen per Geste oder `fingerprint_grow_plus.delete`, `delete_all`
-lässt sie stehen. Entfernen nur mit `fingerprint_grow_plus.delete_admin` und Code. In
-`on_finger_scan_matched` die normalen Aktionen mit `fingerprint_grow_plus.is_admin_slot` und
-`fingerprint_grow_plus.is_admin_busy` ausschließen (Beispiel im README).
-
-## Gästefinger
-
-Mit `guests: "150-179"` und `time_id` lernt `fingerprint_grow_plus.enroll_guest` (oder die
-Admin-Geste 5×) einen Finger mit Ablaufdatum ein (Standard `valid_for: 7d`). Das Datum wird an alle Stationen übertragen;
-nach Ablauf wird der Finger überall gelöscht. `fingerprint_grow_plus.extend_guest` verlängert.
-
-**Protokoll Version 3:** Diese Version spricht nicht mit älteren Ständen. Alle Stationen gemeinsam
-aktualisieren.
+Details: [network.md](../network.md).
 
 ## Backup und Restore
+
+`tools/growplus.py` (Python 3, nur Standardbibliothek) liest und schreibt die Finger eines Geräts
+über die Sync-Verbindung. Die Backup-Dateien sind mit dem Schlüssel verschlüsselt.
 
 Linux / macOS:
 
@@ -141,35 +215,23 @@ py tools\growplus.py inspect --in <geraet>-<datum>_<uhrzeit>.fgpb
 py tools\growplus.py restore --host <geraet>.local --in <datei>.fgpb
 ```
 
-Ohne `--out` heißt die Datei automatisch `<geraet>-<datum>_<uhrzeit>.fgpb`. Statt der
-Umgebungsvariable geht auf jedem System auch `--key-file <datei>`.
+Das Tool braucht den `sync:`-Block und sichert nur synchronisierte Slots: Ein Gerät ohne Sync
+oder die lokalen Slots eines Geräts mit `include_slots` lassen sich so nicht sichern.
 
-Backup-Dateien sind verschlüsselt, enthalten aber biometrische Daten: nie in ein Repository legen.
+Ohne `--out` heißt die Datei `<geraet>-<datum>_<uhrzeit>.fgpb`. Statt der Umgebungsvariable geht
+auf jedem System auch `--key-file <datei>`. Backup-Dateien enthalten biometrische Daten: nie in
+ein Repository legen.
 
-## Nur einzelne Slots synchronisieren
+## Entitäten
 
-`include_slots` / `exclude_slots` bestimmen nur, was **synchronisiert** wird. Admin-Gesten, Gäste,
-`enroll_next_free` und `delete_all` arbeiten auf allen Slots des Sensors; Slots außerhalb bleiben
-lokal. Beispiel: Ein Gerät an einem anderen Standort teilt nur den Admin-Finger
-(`include_slots: ["99"]`) und hat sonst eigene Finger. Über VPN/Router funktioniert mDNS nicht,
-dort die Peers als IP-Adresse oder DNS-Namen eintragen.
+Der Text-Sensor `occupied_slots` zeigt die belegten Slots als Bereiche, z. B. `0, 2-5, 99, 150-151`:
 
-Der Text-Sensor `occupied_slots` (Plattform `fingerprint_grow_plus` unter `text_sensor:`) zeigt
-die belegten Slots als Bereiche, z. B. `0, 2-5, 99, 150-151`.
+```yaml
+text_sensor:
+  - platform: fingerprint_grow_plus
+    occupied_slots:
+      name: Belegte Plätze
+```
 
-## Netzwerk
-
-Es wird ein TCP-Port (Standard 18530) in beide Richtungen zwischen allen Geräten genutzt.
-
-- **Gleiches Netz:** `.local`-Namen funktionieren.
-- **Über VLAN/Router:** IP-Adressen oder DNS-Namen verwenden und den Port in der Firewall
-  freigeben.
-
-Details: [network.md](../network.md).
-
-## LED-Rückmeldung
-
-Die Komponente steuert keine LEDs. Für die eigene LED-Logik gibt es die Trigger:
-
-- `on_sync_started`, `on_sync_done`, `on_sync_failed`
-- `on_conflict`, `on_slot_updated`, `on_slot_deleted`, `on_enroll_started`
+Weitere (Sync-Status, Konflikte, erreichbare Geräte, letzter Sync) und alle Optionen, Aktionen
+und Trigger: siehe [README](../../README.md#configuration-reference).

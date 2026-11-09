@@ -3,23 +3,26 @@
 ## Overview
 
 ```
- ┌───────────── node ─────────────┐            ┌───────────── node ─────────────┐
- │ fingerprint_grow  (official)   │            │ fingerprint_grow               │
- │   matching, enroll, LED        │            │                                │
- │        ▲  callbacks            │            │                                │
- │ fingerprint_grow_plus               │  TCP 18530 │ fingerprint_grow_plus               │
- │   GrowLink ──UART── R503       │◄──────────►│   GrowLink ──UART── R503       │
- │   job queue (1 job / loop)     │  encrypted │                                │
- │   SlotStore (meta + hashes)    │            │                                │
- │   SecureChannel / TcpTransport │            │                                │
- └────────────────────────────────┘            └────────────────────────────────┘
+ ┌───────────── node ──────────────┐             ┌───────────── node ──────────────┐
+ │ fingerprint_grow  (official)    │             │ fingerprint_grow                │
+ │   matching, enroll, LED         │             │                                 │
+ │        ▲  callbacks             │             │                                 │
+ │ fingerprint_grow_plus           │  TCP 18530  │ fingerprint_grow_plus           │
+ │   admin / guests                │◄───────────►│   admin / guests                │
+ │   GrowLink ──UART── R503        │  encrypted  │   GrowLink ──UART── R503        │
+ │   job queue (1 job / loop)      │  (sync:)    │                                 │
+ │   slot metadata + hashes        │             │                                 │
+ │   SecureChannel / TcpTransport  │             │                                 │
+ └─────────────────────────────────┘             └─────────────────────────────────┘
 ```
 
 `fingerprint_grow_plus` is a separate component on the same UART bus as `fingerprint_grow`.
+Admin fingers and guests work on one node; the `sync:` block adds the network part. Without it
+no socket is opened and the sync rounds below only re-read the local index.
 The official class is `final` and its protocol helpers are `protected`, so it can be neither
 subclassed nor reused. `fingerprint_grow_plus` therefore has its own small driver (`GrowLink`) for the
 template commands of the R503 manual (`LoadChar`, `UpChar`, `DownChar`, `Store`, `DeletChar`,
-`Match`, `ReadSysPara`, `TempleteNum`, `ReadIndexTable`, `ReadNotepad`, `WriteNotepad`).
+`Match` (diagnostics only), `ReadSysPara`, `TempleteNum`, `ReadIndexTable`, `ReadNotepad`, `WriteNotepad`).
 `SetPwd` and `SetSysPara` are not implemented: the sensor password and parameters are never changed.
 
 ### Sharing the UART safely
@@ -38,8 +41,9 @@ Matching has priority:
 
 - No job runs within 1.5 s after any scan activity (`on_finger_scan_*`).
 - No job runs while the optional `finger_sensor` is on.
-- At most one job runs per `loop()`. The longest job (store + verify) takes about 0.4–0.6 s at
-  57600 baud. A finger placed during a job is matched right after it.
+- At most one job runs per `loop()`. Reading or writing a template (1536 bytes on the R503,
+  57600 baud) blocks the loop for about 0.3 s (read) to 1.2–1.7 s (store + read-back
+  verification). A finger placed during a job is matched right after it.
 
 ## Data model
 
@@ -62,12 +66,12 @@ A sync **round** is started:
 
 - after boot,
 - 2 s after a local change (push),
-- every `sync_interval`,
+- every `sync: interval` (default 15 min),
 - by `fingerprint_grow_plus.sync`.
 
 A round first re-reads the sensor's index table, which also catches changes made by
 `fingerprint_grow` actions. It then opens one session per peer, one after the other. In a session
-both sides send their manifest (all managed, non-empty slots with state, version and hash). Each
+both sides send their manifest (all synced, non-empty slots with state, version and hash). Each
 side then pulls what it needs, so one connection syncs both directions.
 
 Decision for one slot, local `L`, remote `R`:
@@ -109,24 +113,27 @@ Resolve a conflict with `resolve_conflict(slot, keep_local)`, or all of them wit
 - If the slot was empty locally but holds a different finger elsewhere, the result is a
   conflict, never an overwrite.
 - `enroll_next_free` avoids this. It picks the lowest slot in `enroll_slots` that is empty here,
-  was not seen on any peer in the current round, and is not the admin slot.
+  has never been seen occupied on a peer since boot, has no conflict or tombstone, and is neither
+  an admin slot nor (except for guests) a guest slot.
 
 **Deletion:**
 
 - `fingerprint_grow_plus.delete` writes a tombstone with a new version, which propagates.
-- `delete_all` requires the configured code (and `confirm_cluster_wide: true` in YAML). It writes
-  tombstones for all managed slots. Slots excluded from the sync on a node are never touched.
+- `delete_all` requires the configured code. It writes tombstones for all synced slots except
+  the admin slots and deletes the local-only slots of this node. Local-only slots of other nodes
+  are never touched.
 
-**Slot filter:** `include_slots` / `exclude_slots` define the managed slots of a node.
-Unmanaged slots are not announced, not accepted and not deleted by the sync. Excluding a range on
-all nodes but one makes it node-exclusive.
+**Slot filter:** `sync: include_slots` / `exclude_slots` define the synced slots of a node.
+Other slots are local only: not announced, not accepted and not deleted by the sync, but admin
+gestures, guests, `enroll_next_free` and `delete_all` still work on them. Excluding a range on
+all nodes but one makes it node-exclusive; `include_slots: ["99"]` shares only slot 99.
 
 ## Failure behaviour
 
 | situation | behaviour |
 |---|---|
-| peer offline | session fails after 12 s, round reports `on_sync_failed`, retried next round; the peer catches up when it is back |
-| reboot during a transfer | nothing half-written: a template is stored only after the complete, checksum-verified message arrived; the store is verified by read-back (or module match) and deleted if verification fails |
+| peer offline | session fails after 12 s, round reports `sync: on_failed`, retried next round; the peer catches up when it is back |
+| reboot during a transfer | nothing half-written: a template is stored only after the complete, checksum-verified message arrived; the store is verified by a byte-exact read-back and deleted if verification fails |
 | connection lost mid-session | session ends, remaining slots are synced in the next round |
 | sensor replaced | index empty → all slots "missing" → restored from peers (no deletion) |
 | sensor full / slot out of range | `Store` error (0x0B/0x18) → error counter, nothing else changes |
@@ -139,7 +146,7 @@ all nodes but one makes it node-exclusive.
 
 - **Home Assistant as hub.** Excluded by design. The sync must work while HA is down.
 - **ESP-NOW.** ESP32 only and not routable.
-- **`packet_transport` / `udp`.** Built for small sensor states. A 768-byte template would need
+- **`packet_transport` / `udp`.** Built for small sensor states. A 1536-byte template would need
   fragmentation and our own retransmission. `udp` also accepts IPv4 literals only, no hostnames.
 - **A master node.** It would be a single point of failure, and enrolling would be restricted to
   one node.

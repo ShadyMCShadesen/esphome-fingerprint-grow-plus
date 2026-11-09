@@ -9,7 +9,7 @@ from esphome.const import (
     STATE_CLASS_MEASUREMENT,
 )
 
-from . import CONF_FINGERPRINT_SYNC_ID, FingerprintGrowPlusComponent
+from . import CONF_FINGERPRINT_GROW_PLUS_ID, FingerprintGrowPlusComponent
 
 DEPENDENCIES = ["fingerprint_grow_plus"]
 
@@ -20,7 +20,7 @@ CONF_LAST_SYNC = "last_sync"
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(CONF_FINGERPRINT_SYNC_ID): cv.use_id(FingerprintGrowPlusComponent),
+        cv.GenerateID(CONF_FINGERPRINT_GROW_PLUS_ID): cv.use_id(FingerprintGrowPlusComponent),
         cv.Optional(CONF_PEERS_REACHABLE): sensor.sensor_schema(
             icon="mdi:lan-connect",
             accuracy_decimals=0,
@@ -47,7 +47,7 @@ CONFIG_SCHEMA = cv.Schema(
 
 
 async def to_code(config):
-    parent = await cg.get_variable(config[CONF_FINGERPRINT_SYNC_ID])
+    parent = await cg.get_variable(config[CONF_FINGERPRINT_GROW_PLUS_ID])
     for key, setter in (
         (CONF_PEERS_REACHABLE, parent.set_peers_reachable_sensor),
         (CONF_ERROR_COUNT, parent.set_error_count_sensor),

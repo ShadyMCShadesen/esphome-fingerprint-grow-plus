@@ -1,5 +1,4 @@
-# Shared part of the examples: fingerprint_grow_plus plus the three enrollment methods
-# that work without Home Assistant (physical button, web UI, admin finger).
+# Shared part of the multi-node examples (esp32-arduino, esp32-idf, esp8266).
 # Include it with `packages:` and provide the substitutions listed below.
 #
 # Required substitutions: sensing_pin, enroll_button_pin
@@ -12,7 +11,7 @@ fingerprint_grow:
     allow_other_uses: true
   on_finger_scan_matched:
     - if:
-        # Admin fingers only operate the sync, and a finger shown during an admin action
+        # Admin fingers only operate the menu, and a finger shown during an admin action
         # (delete / re-enroll) is a target, not a visitor: never open anything for them.
         condition:
           not:
@@ -26,71 +25,64 @@ fingerprint_grow:
 
 fingerprint_grow_plus:
   id: fp_plus
-  fingerprint_grow_id: grow
-  uart_id: uart_sensor
-  key: !secret fingerprint_grow_plus_key
-  # All nodes in one list; the node skips itself automatically.
-  peers:
-    - reader-garden.local
-    - reader-garage.local
-    - 192.168.10.23
-    - reader-office.example.lan:18530
-  # Only accept peers from these networks (optional).
-  allowed_networks:
-    - 192.168.10.0/24
-  # Slots 180-199 stay local on every node (node-exclusive range).
-  exclude_slots: ["180-199"]
+  finger_sensor: finger_detected        # touch pin: gestures end on lift, hold detection
+  time_id: sntp_time                    # guest expiry
   enroll_slots: "1-179"
   delete_all_code: !secret fingerprint_delete_all_code
-  finger_sensor: finger_detected
   fingerprint_count_sensor: fingerprint_count
   fingerprint_capacity_sensor: fingerprint_capacity
-  # Admin fingers (protected): 2 touches = enroll next free slot, 3 touches + finger = delete
-  # that finger everywhere, 4 touches + finger = re-enroll it, 5 touches = enroll a guest,
-  # hold 3 s = status (on_admin_hold). These are the defaults; `admin:` alone means slot 0.
-  admin:
-    slots: [0, 1]
-  # Guest fingers (valid 7 days by default) are deleted on all nodes when they expire
-  # (needs time_id).
-  guests: "150-179"
-  time_id: sntp_time
-  on_admin_hold:
-    # Status colour: green = in sync, blue = syncing, yellow = conflict, red = error.
-    - lambda: |-
-        static const uint8_t colors[] = {4, 2, 5, 1};
-        id(grow).aura_led_control(2, 50, colors[id(fp_plus).health()], 5);
-  on_admin_waiting:
-    - logger.log:
-        format: "show the finger to %s"
-        args: [action.c_str()]
-  # Recommended for the very first run on existing sensors: only log what would happen.
-  dry_run: false
-  on_sync_started:
-    - logger.log: "fingerprint sync started"
-  on_sync_done:
-    - logger.log: "fingerprint sync done"
-  on_sync_failed:
-    - logger.log:
-        format: "fingerprint sync failed: %s"
-        args: [reason.c_str()]
-  on_conflict:
-    - logger.log:
-        level: WARN
-        format: "slot %u holds different fingers on different nodes"
-        args: [slot]
-  on_admin_touch:
-    # First touch of the admin finger: show that the node waits for the second touch.
-    - fingerprint_grow.aura_led_control:
-        state: FLASHING
-        speed: 50
-        color: CYAN
-        count: 5
   on_enroll_started:
     - fingerprint_grow.aura_led_control:
         state: FLASHING
         speed: 50
         color: PURPLE
         count: 0
+
+  # Admin fingers in slot 0 and 1 (protected). Touch, lift, wait 2 s:
+  # 2x = enroll the next free slot, 3x + finger = delete that finger, 4x + finger = enroll it
+  # again, 5x = enroll a guest. Keep it on the sensor for 3 s = status colour.
+  admin:
+    slots: [0, 1]
+    on_touch:
+      - fingerprint_grow.aura_led_control:
+          state: FLASHING
+          speed: 50
+          color: CYAN
+          count: 5
+    on_hold:
+      # health(): 0 green = all fine, 1 blue = sync running, 2 yellow = conflict, 3 red = error
+      - lambda: |-
+          static const uint8_t colors[] = {4, 2, 5, 1};
+          id(grow).aura_led_control(2, 50, colors[id(fp_plus).health()], 5);
+    on_waiting:
+      - logger.log:
+          format: "show the finger to %s"
+          args: [action.c_str()]
+
+  # Guest fingers in slots 150-179, valid 7 days, deleted (on all nodes) when they expire.
+  guests: "150-179"
+
+  # Sync with the other nodes. Leave this block out for a stand-alone node.
+  sync:
+    key: !secret fingerprint_grow_plus_key
+    peers:                              # all nodes; a node skips itself
+      - reader-garden.local
+      - reader-garage.local
+      - 192.168.10.23
+      - reader-office.example.lan:18530
+    allowed_networks:                   # accept peers only from here (optional)
+      - 192.168.10.0/24
+    exclude_slots: ["180-199"]          # stay on each node (node-exclusive)
+    dry_run: false                      # true for the very first run on existing sensors
+    on_failed:
+      - logger.log:
+          format: "fingerprint sync failed: %s"
+          args: [reason.c_str()]
+    on_conflict:
+      - logger.log:
+          level: WARN
+          format: "slot %u holds different fingers on different nodes"
+          args: [slot]
 
 binary_sensor:
   - platform: gpio
@@ -100,7 +92,7 @@ binary_sensor:
       number: ${sensing_pin}
       inverted: true
       allow_other_uses: true
-  # Method 1: physical button enrolls the next free slot.
+  # Enroll with a physical button.
   - platform: gpio
     id: enroll_button
     name: Enroll button
@@ -111,8 +103,7 @@ binary_sensor:
     filters:
       - delayed_on: 50ms
     on_press:
-      - fingerprint_grow_plus.enroll_next_free:
-          num_scans: 3
+      - fingerprint_grow_plus.enroll_next_free: 3
   - platform: fingerprint_grow_plus
     syncing:
       name: Fingerprint sync running
@@ -135,14 +126,16 @@ sensor:
 
 text_sensor:
   - platform: fingerprint_grow_plus
+    occupied_slots:
+      name: Occupied fingerprint slots
     status:
       name: Fingerprint sync status
 
-# Method 2: web UI (web_server) - pick a slot or use the next free one.
+# Enroll and delete from the web UI (web_server).
 number:
   - platform: template
-    id: enroll_slot
-    name: Enroll slot
+    id: selected_slot
+    name: Selected slot
     optimistic: true
     min_value: 1
     max_value: 179
@@ -158,12 +151,12 @@ button:
     name: Enroll selected slot
     on_press:
       - fingerprint_grow.enroll:
-          finger_id: !lambda "return (uint16_t) id(enroll_slot).state;"
+          finger_id: !lambda "return (uint16_t) id(selected_slot).state;"
           num_scans: 3
   - platform: template
-    name: Delete selected slot on all nodes
+    name: Delete selected slot
     on_press:
-      - fingerprint_grow_plus.delete: !lambda "return (uint16_t) id(enroll_slot).state;"
+      - fingerprint_grow_plus.delete: !lambda "return (uint16_t) id(selected_slot).state;"
   - platform: template
     name: Sync fingerprints now
     on_press:

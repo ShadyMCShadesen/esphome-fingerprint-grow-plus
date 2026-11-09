@@ -35,7 +35,7 @@ NODES = {
     "node-d": {"port": 18534, "peers": ["node-a"], "include": ["0-199"], "exclude": [], "key": WRONG_KEY},
     # node-e runs in dry-run mode: it must log what it would do and change nothing
     "node-e": {"port": 18535, "peers": ["node-a"], "include": ["0-199"], "exclude": [], "dry_run": True},
-    # node-f runs stand-alone (no key): admin features only, no network port
+    # node-f runs stand-alone (no sync: block): admin features only, no network port
     "node-f": {"port": 0, "peers": [], "include": ["0-199"], "exclude": [], "standalone": True},
     # node-g syncs only the admin slot 0 with node-a; all other slots are local
     "node-g": {"port": 18537, "peers": ["node-a"], "include": ["0"], "exclude": []},
@@ -51,6 +51,26 @@ SEEDS = {
     "node-f": {"0": {"finger": "admin"}},
     "node-g": {"1": {"finger": "gina"}},
 }
+
+SYNC_BLOCK = """  sync:
+    key: "{key}"
+    port: {port}
+    peers: {peers}
+    include_slots: {include}
+    exclude_slots: {exclude}
+    interval: 15s
+    dry_run: {dry_run}
+    on_done:
+      - logger.log: "TEST-EVENT sync_done"
+    on_failed:
+      - logger.log:
+          format: "TEST-EVENT sync_failed %s"
+          args: [reason.c_str()]
+    on_conflict:
+      - logger.log:
+          format: "TEST-EVENT conflict %u"
+          args: [slot]
+"""
 
 YAML_TEMPLATE = """
 esphome:
@@ -96,66 +116,45 @@ text_sensor:
       name: Occupied slots
 fingerprint_grow_plus:
   id: fp_plus
-  key: "{key}"
-  port: {port}
-  peers: {peers}
-  include_slots: {include}
-  exclude_slots: {exclude}
-  sync_interval: 15s
-  dry_run: {dry_run}
   startup_delay: 2s
   fingerprint_count_sensor: fp_count
   fingerprint_capacity_sensor: fp_capacity
   delete_all_code: TEST_ALL
   time_id: host_time
-  admin:
-    slots: [0, 9]
-    enroll_touches: 2
-    delete_touches: 3
-    reenroll_touches: 4
-    guest_touches: 5
-    window: 2s
-    target_timeout: 15s
-    num_scans: 2
-  guests:
-    slots: "100-109"
-    valid_for: 25s
-  on_admin_access:
-    - logger.log:
-        format: "TEST-EVENT admin_access %u"
-        args: [finger_id]
-  on_admin_gesture:
-    - logger.log:
-        format: "TEST-EVENT admin_gesture %u"
-        args: [touches]
-  on_admin_waiting:
-    - logger.log:
-        format: "TEST-EVENT admin_waiting %s"
-        args: [action.c_str()]
-  on_admin_cancelled:
-    - logger.log: "TEST-EVENT admin_cancelled"
-  on_admin_done:
-    - logger.log:
-        format: "TEST-EVENT admin_done %s %u"
-        args: [action.c_str(), slot]
-  on_sync_done:
-    - logger.log: "TEST-EVENT sync_done"
-  on_sync_failed:
-    - logger.log:
-        format: "TEST-EVENT sync_failed %s"
-        args: [reason.c_str()]
-  on_conflict:
-    - logger.log:
-        format: "TEST-EVENT conflict %u"
-        args: [slot]
-  on_admin_touch:
-    - logger.log:
-        format: "TEST-EVENT admin_touch %u"
-        args: [touches]
   on_enroll_started:
     - logger.log:
         format: "TEST-EVENT enroll_started %u"
         args: [slot]
+  admin:
+    slots: [0, 9]
+    target_timeout: 15s
+    num_scans: 2{admin_extra}
+    on_touch:
+      - logger.log:
+          format: "TEST-EVENT admin_touch %u"
+          args: [touches]
+    on_access:
+      - logger.log:
+          format: "TEST-EVENT admin_access %u"
+          args: [finger_id]
+    on_gesture:
+      - logger.log:
+          format: "TEST-EVENT admin_gesture %u"
+          args: [touches]
+    on_waiting:
+      - logger.log:
+          format: "TEST-EVENT admin_waiting %s"
+          args: [action.c_str()]
+    on_cancelled:
+      - logger.log: "TEST-EVENT admin_cancelled"
+    on_done:
+      - logger.log:
+          format: "TEST-EVENT admin_done %s %u"
+          args: [action.c_str(), slot]
+  guests:
+    slots: "100-109"
+    valid_for: 25s
+{sync_block}
 interval:
   - interval: 300ms
     then:
@@ -198,11 +197,7 @@ class Cluster:
         OUT.mkdir(parents=True, exist_ok=True)
         for name, cfg in NODES.items():
             peers = [f"127.0.0.1:{NODES[p]['port']}" for p in cfg["peers"]]
-            yaml = YAML_TEMPLATE.format(
-                name=name,
-                components=ROOT / "components",
-                pty=self.path(name, "pty"),
-                cmd=self.path(name, "cmd"),
+            sync_block = "" if cfg.get("standalone") else SYNC_BLOCK.format(
                 key=cfg.get("key", KEY),
                 port=cfg["port"],
                 peers=json.dumps(peers),
@@ -210,12 +205,14 @@ class Cluster:
                 exclude=json.dumps(cfg["exclude"]),
                 dry_run="true" if cfg.get("dry_run") else "false",
             )
-            if cfg.get("standalone"):
-                head, tail = yaml.split("\nfingerprint_grow_plus:\n", 1)
-                tail = "\n".join(l for l in tail.splitlines()
-                                  if not l.startswith(("  key:", "  port:", "  peers:")))
-                yaml = head + "\nfingerprint_grow_plus:\n" + tail
-                yaml = yaml.replace("    num_scans: 2\n", "    num_scans: 2\n    access: delayed\n", 1)
+            yaml = YAML_TEMPLATE.format(
+                name=name,
+                components=ROOT / "components",
+                pty=self.path(name, "pty"),
+                cmd=self.path(name, "cmd"),
+                admin_extra="\n    access: delayed" if cfg.get("standalone") else "",
+                sync_block=sync_block,
+            )
             yaml_path = self.path(name, "yaml")
             yaml_path.write_text(yaml, encoding="utf-8")
             print(f"== compiling {name}", flush=True)
@@ -406,7 +403,7 @@ def main():
         c.touch("node-a", "admin")
         time.sleep(1.5)
         c.touch("node-a", "admin")
-        results.append(wait_until("on_admin_touch fired for touch 1 and 2",
+        results.append(wait_until("on_touch fired for touch 1 and 2",
                                   lambda: "TEST-EVENT admin_touch 1" in c.log("node-a")
                                   and "TEST-EVENT admin_touch 2" in c.log("node-a"), 20))
         results.append(wait_until("enrollment started for slot 3",
@@ -496,13 +493,13 @@ def main():
         results.append(wait_until("backup file is encrypted (no template bytes in clear)",
                                   lambda: b"frank" not in raw and b"admin" not in raw and len(raw) > 100, 1))
 
-        print("== Scenario 6: delete_all needs the code, then wipes managed slots everywhere")
+        print("== Scenario 6: delete_all needs the code, then wipes synced slots everywhere")
         c.cmd("node-a", "delete_all_wrong")
         time.sleep(5)
         results.append(wait_until("wrong code changes nothing", lambda: c.slots("node-a").get(3) == "frank", 5))
         c.cmd("node-a", "delete_all")
         results.append(wait_until(
-            "all managed slots gone on A, B, C except the admin fingers; C's exclusive slot 150 survives",
+            "all synced slots gone on A, B, C except the admin fingers; C's exclusive slot 150 survives",
             lambda: c.slots("node-a") == {0: "admin", 9: "boss"} and c.slots("node-b") == {0: "admin", 9: "boss"}
             and c.slots("node-c") == {0: "admin", 9: "boss", 150: "eve"}, 90))
 
@@ -570,11 +567,11 @@ def main():
         results.append(wait_until("frank (slot 3) deleted on A, B and C by the admin gesture",
                                   lambda: all(3 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 60))
 
-        print("== Scenario 10: stand-alone node (no key) enrolls with the admin gesture")
+        print("== Scenario 10: stand-alone node (no sync: block) enrolls with the admin gesture")
         results.append(wait_until("stand-alone node reports the network sync as off",
-                                  lambda: "Network sync: off" in c.log("node-f"), 5))
+                                  lambda: "Sync: off" in c.log("node-f"), 5))
         c.touch("node-f", "admin")
-        results.append(wait_until("a single admin touch fires on_admin_access once the gesture is complete",
+        results.append(wait_until("a single admin touch fires on_access once the gesture is complete",
                                   lambda: c.log("node-f").count("TEST-EVENT admin_access 0") == 1, 10))
         time.sleep(1)
         c.touch("node-f", "admin")

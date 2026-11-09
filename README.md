@@ -1,66 +1,35 @@
 # esphome-fingerprint-grow-plus
 
-Extensions for ESPHome's [`fingerprint_grow`](https://esphome.io/components/fingerprint_grow/)
-(GROW R503, R30x, …): admin fingers that run the sensor without Home Assistant, guest fingers
-with an expiry date, protected slots, and **optionally** synchronisation of all fingers between
-several ESPHome nodes, in the same slot, directly over an encrypted connection (no Home
-Assistant, MQTT broker or cloud service).
+Extra features for ESPHome's [`fingerprint_grow`](https://esphome.io/components/fingerprint_grow/)
+(GROW R503, R30x, …), all without Home Assistant:
 
-> **Status: beta.** Compiled in CI for ESP32 (Arduino and ESP-IDF) and ESP8266, tested end-to-end
-> on the ESPHome host platform with simulated sensors, and running on real ESP32-S2 + R503
-> hardware (four synchronised nodes). Before enabling the sync on sensors that already hold
-> fingers, read [First rollout](#first-rollout-on-sensors-that-already-hold-fingers).
+- **Admin fingers** run the sensor: enroll new fingers, delete or re-enroll a finger by showing
+  it, show a status colour.
+- **Guest fingers** expire after a set time and are deleted automatically.
+- **Protected slots**: admin fingers cannot be deleted by accident.
+- **Sync** *(optional)*: several ESPHome nodes keep the same fingers in the same slots. Enroll once,
+  open everywhere. The nodes talk directly to each other, encrypted; no broker, no cloud.
 
-> **Renamed:** this project was called `fingerprint_sync`. Replace `fingerprint_sync` with
-> `fingerprint_grow_plus` in your YAML and update all nodes together (sync protocol 3). Slot
-> versions and guest expiry dates start fresh, backups made with `fpsync.py` cannot be read by
-> `tools/growplus.py`: make a new backup after the update.
+> **Status: beta.** Compiled in CI for ESP32 (Arduino, ESP-IDF) and ESP8266, tested end-to-end
+> with simulated sensors, running on real ESP32-S2 + R503 hardware (several synced nodes).
 
 ## How it works
 
 ```
- node A                               node B (optional)
- fingerprint_grow       (official)    fingerprint_grow
- fingerprint_grow_plus ─ TCP 18530 ─► fingerprint_grow_plus
- R503 on one UART                     R503 on one UART
+ fingerprint_grow        (official component: matching, enrollment, LEDs - unchanged)
+ fingerprint_grow_plus   (this component, same UART)
+   ├─ admin:   gestures with an admin finger
+   ├─ guests:  fingers with an expiry date
+   └─ sync:    ◄── TCP 18530, encrypted ──►  other nodes   (optional)
 ```
 
-`fingerprint_grow_plus` sits next to `fingerprint_grow` on the same UART and leaves it
-untouched: matching, enrollment, Aura LED and its sensors keep working as before. It adds:
-
-| Feature | Needs |
-|---|---|
-| Admin fingers: enroll, delete and re-enroll fingers by gesture, status on hold | `admin:` |
-| Guest fingers deleted automatically when they expire | `guests:`, `time_id` |
-| Enroll the next free slot from a button or the web UI | – |
-| Protected admin slots, delete-all with a code | – / `delete_all_code` |
-| Sync between nodes, same slot everywhere, conflicts instead of overwrites | `key`, `peers` |
-
-Without `key` the node runs **stand-alone**: no network port is opened and nothing leaves the
-node. With `key` and `peers` every slot carries a version; after a change on any node, and every
-`sync_interval`, the nodes compare their slot lists and fetch what they are missing. Admin
-gestures, deletions and guest expiry then apply to all nodes.
-
-## Features
-
-- **Admin fingers** (protected) with gestures: enroll the next free slot, delete or re-enroll a
-  finger by showing it, enroll a guest, status colour on hold.
-- **Guest fingers** with an expiry date, deleted (on all nodes) when they expire.
-- **Enroll without Home Assistant**: admin finger, physical button or the web UI.
-- **LED feedback via triggers**: the component never drives the LEDs itself.
-- **Sync (optional)**: same slot on every node, so automations based on the slot number keep
-  working everywhere; deletions propagate; a slot that is merely missing on one node is restored
-  from the others; two different templates in one slot are a conflict and never overwritten;
-  node-exclusive slot ranges; dry-run mode.
-- **Security**: 256-bit pre-shared key, mutual authentication, ChaCha20 + HMAC-SHA256, replay
-  protection, optional source network allow list, templates never logged.
-- **Verified writes**: checksum on arrival, read back byte for byte after storing.
-- **Routable**: one TCP port; peers as mDNS `.local` names, DNS names or IPv4 addresses.
-- **Backup / restore tool** `tools/growplus.py` (Python standard library only, encrypted files).
+`fingerprint_grow_plus` talks to the same sensor as `fingerprint_grow`, between its scans. Each
+part is switched on by its own block in the YAML; without `sync:` nothing leaves the node and no
+network port is opened.
 
 ## Quick start
 
-### One node, no sync
+### One node
 
 ```yaml
 external_components:
@@ -68,86 +37,80 @@ external_components:
     components: [fingerprint_grow_plus]
 
 fingerprint_grow_plus:
-  finger_sensor: finger_detected   # binary_sensor on the sensor's touch (wakeup) pin
-  admin:                           # admin finger in slot 0; enroll it once with fingerprint_grow
+  finger_sensor: finger_detected   # binary_sensor on the sensor's touch (wake-up) pin
+  admin:                           # admin finger in slot 0
 ```
 
-Touch the admin finger twice and lift it: the next free slot is enrolled. See
-[Admin fingers](#admin-fingers) and [Guest fingers](#guest-fingers).
+1. Enroll your admin finger once into slot 0 (e.g. `fingerprint_grow.enroll`).
+2. Touch it twice, lift it and wait 2 s: the next free slot is enrolled.
+3. Keep admin fingers out of your door action (see [Admin fingers](#admin-fingers)).
+
+A complete example: [`examples/standalone.yaml`](examples/standalone.yaml).
 
 ### Several nodes with sync
 
-1. Create a key once and put it into `secrets.yaml` (same value for all nodes):
+1. Create a key once and put it into `secrets.yaml` (the same key for all nodes):
 
    ```bash
    python3 tools/growplus.py genkey
    ```
 
    ```yaml
-   # secrets.yaml
    fingerprint_grow_plus_key: "<output of genkey>"
    ```
 
-2. Add to every node:
+2. Add a `sync:` block to every node:
 
    ```yaml
    fingerprint_grow_plus:
-     key: !secret fingerprint_grow_plus_key
-     peers:                 # all nodes; each node skips itself
-       - reader-garden.local
-       - reader-garage.local
-     dry_run: true          # first run: only log what would happen
+     finger_sensor: finger_detected
+     admin:
+     sync:
+       key: !secret fingerprint_grow_plus_key
+       peers:                 # all nodes, the same list everywhere; a node skips itself
+         - reader-garden.local
+         - reader-garage.local
+       dry_run: true          # first run: only log what would happen
    ```
 
 3. Flash all nodes and read the logs: `Index ready`, `Sync with … finished`,
    `[dry run] would store slot …`, possibly `CONFLICT in slot …`.
-4. Back up every sensor (`tools/growplus.py backup`, see [docs/operations.md](docs/operations.md)),
-   then set `dry_run: false`.
+4. Back up every sensor ([Backup](#backup-and-restore)), then set `dry_run: false`.
 
-`uart_id` and `fingerprint_grow_id` are only needed if a node has more than one UART or
-fingerprint sensor. Complete examples: [`examples/`](examples/) (stand-alone, ESP32 Arduino,
-ESP32 ESP-IDF, ESP8266).
+If the sensors already hold fingers that were enrolled separately, read
+[First rollout](#first-rollout-on-sensors-that-already-hold-fingers) first.
+Complete examples: [`examples/`](examples/) (ESP32 Arduino, ESP32 ESP-IDF, ESP8266).
 
-## Recipes
-
-### First rollout on sensors that already hold fingers
-
-Fingers enrolled separately on each sensor have different template bytes, and the sensor cannot
-tell reliably whether two stored templates belong to the same finger. The sync therefore reports
-**conflicts** and never guesses. Resolve them once:
-
-1. Back up every sensor.
-2. Pick the node whose finger → slot assignment is correct (the *reference*).
-3. On that node only, run `fingerprint_grow_plus.claim_all_slots` (e.g. from a web button). All its
-   slots replace the same slots on the other nodes; in `dry_run` they log
-   `[dry run] would REPLACE slot …`.
-4. Check the logs, then set `dry_run: false`.
-
-If two nodes claim, the later claim wins per slot. Claim on one node only.
-
-### Admin fingers
+## Admin fingers
 
 ```yaml
 fingerprint_grow_plus:
-  admin:                # admin finger in slot 0 with all defaults
+  finger_sensor: finger_detected
+  admin:
+    slots: [0, 1]        # default: [0]
 ```
+
+Touch the admin finger, lift it, and touch again; the gesture is complete when no finger has been
+on the sensor for 2 s (`window`):
 
 | Admin finger | Effect |
 |---|---|
-| 2 touches | enroll the next free slot |
-| 3 touches, then a finger | that finger is deleted on **all** nodes |
-| 4 touches, then a finger | that finger is enrolled again into its own slot; the new template replaces it everywhere |
-| 5 touches (only with `guests:`) | enroll a guest finger |
-| hold ≥ 3 s (needs `finger_sensor`) | `on_admin_hold`: show the status, see `health()` |
+| 2× | enroll the next free slot |
+| 3×, then a finger | that finger is deleted (with sync: on all nodes) |
+| 4×, then a finger | that finger is enrolled again into its own slot |
+| 5× (only with `guests:`) | enroll a guest finger |
+| keep it on for 3 s | `on_hold`: show the status, see `health()` |
+| 1× (only with `access:`) | `on_access`: behave like a normal finger, see below |
 
-- **Gestures**: a gesture is complete when no finger has been on the sensor for `window` (2 s;
-  measured from the last match without `finger_sensor`, so configure it). Showing an admin finger
-  instead of the target finger, or no finger within `target_timeout` (10 s), cancels the action.
-- **Protection**: admin slots are never a free slot, never a gesture target, refused by
-  `fingerprint_grow_plus.delete` and kept by `delete_all`. Only `fingerprint_grow_plus.delete_admin` with
-  the delete code removes one. Use the same `admin: slots` on all nodes.
-- **No access**: `fingerprint_grow` still reports every match. Keep admin fingers, and fingers
-  shown during an admin action, out of your normal actions:
+Showing an admin finger instead of the target finger, or no finger within 10 s
+(`target_timeout`), cancels the action.
+
+**Protection**: admin slots are never chosen as a free slot, cannot be deleted by a gesture or by
+`fingerprint_grow_plus.delete`, and survive `delete_all`. Only `fingerprint_grow_plus.delete_admin`
+with the delete code removes one. With sync, use the same admin slots on all nodes.
+
+**Keep admin fingers out of your door action.** `fingerprint_grow` still reports every match,
+including admin fingers and the finger shown during an admin action:
 
 ```yaml
 fingerprint_grow:
@@ -162,185 +125,211 @@ fingerprint_grow:
           - script.execute: open_door
 ```
 
-**Admin finger as a normal finger too** (`admin: access:`): a single touch fires
-`on_admin_access`, two or more touches still open the admin menu.
-
-- `delayed`: fires once the gesture is complete (the finger stayed away for `window`) and it was
-  one touch. Opening the menu never triggers the access action; the access action comes about
-  2 s after lifting the finger.
-- `immediate`: fires at the first touch without delay. A second touch then opens the menu, but
-  the access action has already run.
+**Admin finger that also opens** (`access:`): one touch fires `on_access`, two or more touches
+open the admin menu.
 
 ```yaml
 fingerprint_grow_plus:
   admin:
-    access: delayed
-  on_admin_access:          # finger_id, confidence
-    - script.execute: open_door
+    access: delayed      # or immediate
+    on_access:           # variables: finger_id, confidence
+      - script.execute: open_door
 ```
 
-Status colour on hold (`health()`: 0 in sync, 1 syncing, 2 conflicts, 3 error):
+- `delayed`: fires once the gesture is complete and it stayed one touch, about 2 s after lifting.
+  Using the admin menu never opens the door.
+- `immediate`: fires at once on the first touch. A second touch opens the menu, but the door has
+  already opened.
+
+**LED feedback** comes from triggers; the component never drives the LEDs itself. Status colour
+on hold:
 
 ```yaml
 fingerprint_grow_plus:
-  finger_sensor: finger_detected
-  on_admin_hold:
-    - lambda: |-
-        static const uint8_t colors[] = {4, 2, 5, 1};  // green, blue, yellow, red
-        id(grow).aura_led_control(2, 50, colors[id(fp_plus).health()], 5);
-```
-
-### Guest fingers
-
-```yaml
-fingerprint_grow_plus:
-  time_id: sntp_time
-  guests: "150-179"     # valid 7 days by default; `valid_for: 2d` to change
-```
-
-Enroll with the 5-touch admin gesture or `fingerprint_grow_plus.enroll_guest`. The expiry date
-travels with the template to all nodes; every node with a valid time deletes the finger on all
-nodes once it has expired. `fingerprint_grow_plus.extend_guest` sets a new validity.
-
-### Enroll with a button or the web UI
-
-```yaml
-binary_sensor:
-  - platform: gpio
-    pin: {number: GPIO18, mode: INPUT_PULLUP, inverted: true}
-    name: Enroll button
-    on_press:
-      - fingerprint_grow_plus.enroll_next_free: 3
-
-button:
-  - platform: template
-    name: Enroll next free slot
-    on_press:
-      - fingerprint_grow_plus.enroll_next_free: 3
-```
-
-### Node-exclusive slots, or sync only some slots
-
-`include_slots` / `exclude_slots` only decide what is **synced**. Admin gestures, guests,
-`enroll_next_free` and `delete_all` work on all slots of the sensor; slots outside the synced
-range simply stay on this node.
-
-```yaml
-fingerprint_grow_plus:
-  exclude_slots: ["180-199"]   # never sent, received or deleted by the sync
-```
-
-A node at another site that only shares the admin finger and keeps its own users:
-
-```yaml
-fingerprint_grow_plus:
-  key: !secret fingerprint_grow_plus_key
-  peers: [192.168.10.21, 192.168.10.22]   # mDNS does not cross VPNs/routers: use IPs or DNS
-  include_slots: ["99"]                   # only the admin finger is synced
   admin:
-    slots: [99]
+    on_hold:
+      # health(): 0 green = all fine, 1 blue = sync running, 2 yellow = conflict, 3 red = error
+      - lambda: |-
+          static const uint8_t colors[] = {4, 2, 5, 1};
+          id(grow).aura_led_control(2, 50, colors[id(fp_plus).health()], 5);
 ```
+
+## Guest fingers
+
+```yaml
+fingerprint_grow_plus:
+  time_id: sntp_time     # required: the expiry needs the real time
+  guests: "150-179"      # valid 7 days; or {slots: "150-179", valid_for: 2d}
+```
+
+Enroll a guest with the 5-touch gesture or `fingerprint_grow_plus.enroll_guest`;
+`fingerprint_grow_plus.extend_guest` sets a new validity. Once expired, the finger is deleted.
+With sync the expiry date travels with the finger, and the first node that notices the expiry
+deletes it everywhere.
+
+## Sync
+
+```yaml
+fingerprint_grow_plus:
+  sync:
+    key: !secret fingerprint_grow_plus_key
+    peers: [reader-garden.local, reader-garage.local, 192.168.10.23]
+```
+
+- **Same slot everywhere**: a finger keeps its slot number on every node, so automations based on
+  the slot keep working.
+- **Nothing is overwritten silently**: two different fingers in the same slot are reported as a
+  *conflict* (`on_conflict`) and left alone until you decide (`resolve_conflict`).
+- **Deleting with `fingerprint_grow_plus.delete`** (or the 3-touch gesture) deletes on all nodes.
+  A finger that is merely missing on one node (new sensor, local delete with
+  `fingerprint_grow.delete`) is copied back from the others.
+- **Offline nodes catch up** when they come back; every 15 min (`interval`) and after every
+  change the nodes compare their slot lists.
+- **Only some slots**: `include_slots` / `exclude_slots` decide what is synced. Slots outside stay
+  on the node; admin gestures, guests and `delete_all` still work there. Example: a node at
+  another site that shares only the admin finger:
+
+  ```yaml
+  fingerprint_grow_plus:
+    admin:
+      slots: [99]
+    sync:
+      key: !secret fingerprint_grow_plus_key
+      peers: [192.168.10.21, 192.168.10.22]   # mDNS does not cross VPNs or routers: use IPs/DNS
+      include_slots: ["99"]
+  ```
+
+- **Security**: 256-bit pre-shared key, mutual authentication, ChaCha20 + HMAC-SHA256, replay
+  protection, optional allow list of source networks; templates are never logged. Every write
+  is checked and read back byte for byte.
+
+### First rollout on sensors that already hold fingers
+
+Fingers enrolled separately on each sensor differ byte by byte, and the sensor cannot tell
+reliably whether two stored templates belong to the same finger. The sync therefore reports
+conflicts instead of guessing. Resolve them once:
+
+1. Back up every sensor.
+2. Pick the node whose finger → slot assignment is correct (the *reference*).
+3. On that node only, run `fingerprint_grow_plus.claim_all_slots` (e.g. from a web button). Its
+   fingers replace the same slots on all other nodes; with `dry_run` they log
+   `[dry run] would REPLACE slot …`.
+4. Check the logs, then set `dry_run: false`.
+
+### Backup and restore
+
+`tools/growplus.py` (Python 3, standard library only) reads and writes the fingers of a node over
+the sync connection; backup files are encrypted with the key.
+
+```bash
+export GROWPLUS_KEY='<key>'                                    # PowerShell: $env:GROWPLUS_KEY = '<key>'
+python3 tools/growplus.py backup --host reader-garden.local     # -> reader-garden-<date>_<time>.fgpb
+python3 tools/growplus.py restore --host reader-garden.local --in <file>.fgpb
+```
+
+A restore needs `fingerprint_grow_plus.allow_restore` on the node first. The tool needs the
+`sync:` block and covers only synced slots: a stand-alone node, or the local-only slots of a node
+with `include_slots`, cannot be backed up this way. Details: [docs/operations.md](docs/operations.md).
 
 ## Configuration reference
 
 ```yaml
 fingerprint_grow_plus:
   id: fp_plus
-  finger_sensor: finger_detected      # binary_sensor on the touch pin: gestures end on lift,
-                                      # hold detection, sync jobs wait while a finger is on
+  finger_sensor: finger_detected      # touch pin: gestures end on lift, hold, sync waits for it
   time_id: sntp_time                  # needed for guests and the last_sync sensor
-  enroll_slots: "1-199"               # range for enroll_next_free (admin and guest slots are skipped)
+  enroll_slots: "1-199"               # where enroll_next_free looks (default: all slots)
   delete_all_code: !secret fingerprint_delete_all_code   # needed for delete_all / delete_admin
-  fingerprint_count_sensor: fingerprint_count            # updated after writes and deletes
-  fingerprint_capacity_sensor: fingerprint_capacity      # cross-check of the slot range
+  fingerprint_count_sensor: fingerprint_count            # refreshed after writes and deletes
+  fingerprint_capacity_sensor: fingerprint_capacity      # cross-check of the capacity
+  startup_delay: 10s                  # first sensor access after boot
   metadata_storage: preferences       # ESP32 default; ESP8266: sensor_notepad
   sensor_address: 0xFFFFFFFF
   uart_id: uart_sensor                # only with several UARTs
   fingerprint_grow_id: grow           # only with several fingerprint_grow
+  on_enroll_started: []               # slot
+  on_slot_updated: []                 # slot: a finger was written by the sync / restore
+  on_slot_deleted: []                 # slot
+
   admin:
-    slots: [0]                        # one or more protected admin slots
-    enroll_touches: 2                 # 0 disables a gesture
+    slots: [0]                        # protected admin slots (1-10)
+    enroll_touches: 2                 # 0 switches a gesture off
     delete_touches: 3
     reenroll_touches: 4
     guest_touches: 5                  # default 5 with guests:, otherwise 0
-    window: 2s                        # pause after lifting that completes a gesture
+    window: 2s                        # no finger for this long completes a gesture
     hold_time: 3s
-    target_timeout: 10s
-    num_scans: 3
-    access: off                       # off | delayed | immediate: single touch = on_admin_access
+    target_timeout: 10s               # time to show the finger to delete / re-enroll
+    num_scans: 3                      # scans per enrollment
+    access: off                       # off | delayed | immediate
+    on_touch: []                      # touches: admin finger matched (1, 2, …)
+    on_gesture: []                    # touches: gesture complete
+    on_access: []                     # finger_id, confidence: single touch with access
+    on_hold: []                       # admin finger kept on the sensor
+    on_waiting: []                    # action ("delete" / "reenroll"): show the finger now
+    on_cancelled: []                  # admin action cancelled or timed out
+    on_done: []                       # action, slot: admin action executed
+
   guests:
     slots: "150-179"                  # at most 64 slots, outside the admin slots
     valid_for: 7d
 
-  # --- sync: all optional; without key the node runs stand-alone ---
-  key: !secret fingerprint_grow_plus_key   # base64 of 32 random bytes, same on all nodes
-  peers:                              # all nodes; a node skips itself (name or name.local)
-    - reader-garden.local             # mDNS: same subnet only
-    - reader-garage.example.lan       # DNS
-    - 192.168.10.23                   # IPv4
-    - {host: 10.20.0.5, port: 18531}
-  port: 18530                         # listen port and default peer port
-  allowed_networks: [192.168.10.0/24] # accept inbound peers only from these networks
-  include_slots: ["0-199"]            # synced slots (default: all); local features use all slots
-  exclude_slots: []                   # never synced (node-exclusive slots)
-  sync_interval: 15min                # also re-reads the local index when stand-alone
-  startup_delay: 10s
-  dry_run: false
+  sync:
+    key: !secret fingerprint_grow_plus_key   # required: base64 of 32 random bytes
+    peers:                            # required: all nodes (name, name.local, IP, host:port)
+      - reader-garden.local           # mDNS: same subnet only
+      - reader-garage.example.lan     # DNS
+      - 192.168.10.23
+      - 10.20.0.5:18531
+    port: 18530                       # listen port and default peer port
+    allowed_networks: [192.168.10.0/24]   # accept peers only from these networks
+    include_slots: ["0-199"]          # synced slots (default: all)
+    exclude_slots: []                 # never synced
+    interval: 15min                   # full comparison with all peers
+    dry_run: false                    # true: only log what the sync would write or delete
+    on_started: []
+    on_done: []                       # round finished without errors
+    on_failed: []                     # reason: peer unreachable, sensor busy, …
+    on_conflict: []                   # slot: a different finger is stored in this slot elsewhere
 ```
-
-### Triggers
-
-| Trigger | Variables | When |
-|---|---|---|
-| `on_sync_started` / `on_sync_done` | – | a sync round starts / ends without errors |
-| `on_sync_failed` | `std::string reason` | a round had errors (peer unreachable, sensor busy, …) |
-| `on_conflict` | `uint16_t slot` | a different template is stored in this slot on a peer |
-| `on_slot_updated` / `on_slot_deleted` | `uint16_t slot` | the sync wrote / deleted a slot on this sensor |
-| `on_enroll_started` | `uint16_t slot` | enrollment of a free, guest or re-enrolled slot started |
-| `on_admin_touch` | `uint8_t touches` | admin finger matched (1, 2, …) |
-| `on_admin_access` | `uint16_t finger_id`, `uint16_t confidence` | single admin touch with `admin: access` |
-| `on_admin_gesture` | `uint8_t touches` | gesture complete |
-| `on_admin_hold` | – | admin finger held |
-| `on_admin_waiting` | `std::string action` | waiting for the finger to `delete` / `reenroll` |
-| `on_admin_cancelled` | – | admin action aborted or timed out |
-| `on_admin_done` | `std::string action`, `uint16_t slot` | admin action executed |
 
 ### Actions
 
 | Action | Parameters | Effect |
 |---|---|---|
-| `fingerprint_grow_plus.sync` | – | start a sync round now |
-| `fingerprint_grow_plus.enroll_next_free` | `num_scans` (3) | enroll the lowest slot free on all known nodes |
-| `fingerprint_grow_plus.delete` | `slot` | delete on all nodes (admin slots refused) |
-| `fingerprint_grow_plus.delete_all` | `code`, `confirm_cluster_wide: true` | delete all managed slots except admins on all nodes |
-| `fingerprint_grow_plus.delete_next_finger` | – | the next finger shown is deleted on all nodes |
-| `fingerprint_grow_plus.reenroll_next_finger` | – | the next finger shown is enrolled again into its slot |
-| `fingerprint_grow_plus.cancel_admin` | – | abort a pending admin action |
-| `fingerprint_grow_plus.delete_admin` | `slot`, `code` | delete an admin slot on all nodes |
-| `fingerprint_grow_plus.enroll_guest` | `num_scans` (3), `valid_for` (7d) | enroll the next free guest slot |
-| `fingerprint_grow_plus.extend_guest` | `slot`, `valid_for` (7d) | new validity for a guest |
-| `fingerprint_grow_plus.claim_all_slots` | – | this node's slots replace the same slots everywhere |
-| `fingerprint_grow_plus.resolve_conflict` | `slot`, `keep_local` | `true`: this node wins; `false`: take the peer's finger |
-| `fingerprint_grow_plus.resolve_all_conflicts` | `keep_local` | the same for all current conflicts |
-| `fingerprint_grow_plus.allow_restore` | `duration` (5min) | accept uploads from `tools/growplus.py restore` |
-| `fingerprint_grow_plus.self_test` | `slot` (0), `compare_slot` | diagnostic: template round trip on the own sensor, no slot written |
+| `enroll_next_free` | `num_scans` (3) | enroll the lowest free slot (with sync: free on all nodes) |
+| `delete` | `slot` | delete a finger (with sync: on all nodes); admin slots refused |
+| `delete_all` | `code` | delete all fingers except the admin fingers (with sync: on all nodes) |
+| `delete_next_finger` | – | the next finger shown is deleted |
+| `reenroll_next_finger` | – | the next finger shown is enrolled again into its slot |
+| `cancel_admin` | – | cancel a pending admin action |
+| `delete_admin` | `slot`, `code` | delete an admin finger |
+| `enroll_guest` | `num_scans` (3), `valid_for` (7d) | enroll the next free guest slot |
+| `extend_guest` | `slot`, `valid_for` (7d) | new validity for a guest |
+| `sync` | – | start a sync round now |
+| `claim_all_slots` | – | this node's fingers replace the same slots on all nodes |
+| `resolve_conflict` | `slot`, `keep_local` | `true`: this node's finger wins; `false`: take the peer's |
+| `resolve_all_conflicts` | `keep_local` | the same for all current conflicts |
+| `allow_restore` | `duration` (5min) | accept a restore from `tools/growplus.py` |
+| `self_test` | `slot` (0), `compare_slot` | diagnostic template round trip on this sensor, writes nothing |
 
-Conditions: `fingerprint_grow_plus.is_syncing`, `is_ready`, `is_admin_busy`, `is_admin_slot`.
-Lambdas: `id(fp_plus).health()`, `slot_expiry(slot)`, `next_free_slot()`, `conflict_count()`.
+All actions are called as `fingerprint_grow_plus.<action>`.
+Conditions: `fingerprint_grow_plus.is_ready`, `is_syncing`, `is_admin_busy`, `is_admin_slot`.
+Lambdas: `id(fp_plus).health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
 
-### Diagnostic entities (optional)
+### Entities (all optional)
 
 ```yaml
+text_sensor:
+  - platform: fingerprint_grow_plus
+    occupied_slots: {name: Occupied slots}   # e.g. "0, 2-5, 99, 150-151"
+    status: {name: Sync status}
 sensor:
   - platform: fingerprint_grow_plus
     peers_reachable: {name: Sync peers reachable}
     error_count: {name: Sync errors}
     conflict_count: {name: Sync conflicts}
-    last_sync: {name: Last sync}          # needs time_id
-text_sensor:
-  - platform: fingerprint_grow_plus
-    status: {name: Sync status}
-    occupied_slots: {name: Occupied slots}   # e.g. "0, 2-5, 99, 150-151"
+    last_sync: {name: Last sync}             # needs time_id
 binary_sensor:
   - platform: fingerprint_grow_plus
     syncing: {name: Syncing}
@@ -348,49 +337,42 @@ binary_sensor:
 
 ## Good to know
 
-- **Deleting**: `fingerprint_grow.delete` / `delete_all` only delete **locally**, and the next
-  round restores the slot from the other nodes. Use `fingerprint_grow_plus.delete`, the 3-touch
-  gesture or `fingerprint_grow_plus.delete_all` for permanent deletion.
-- **Enrolling into an occupied slot** (e.g. `fingerprint_grow.enroll` with a fixed slot)
-  replaces that finger on all nodes. Enrolling into a slot that is free here but used elsewhere
-  creates a conflict; `enroll_next_free` and the admin gesture avoid this.
-- **Blocking**: one sensor job per loop iteration; writing a template blocks the loop for up to
-  about 1.3 s. No job starts while a finger is on the sensor or an enrollment runs.
-- **Upgrading**: the sync protocol has a version (currently 3). Nodes with different versions
-  refuse each other, so update all nodes and `tools/growplus.py` together.
+- **Deleting with sync**: `fingerprint_grow.delete` / `delete_all` delete only on this sensor, and
+  the next round copies the finger back from the other nodes. Delete with
+  `fingerprint_grow_plus.delete`, the 3-touch gesture or `fingerprint_grow_plus.delete_all`.
+- **Enrolling into a fixed slot** with `fingerprint_grow.enroll`: an occupied slot is replaced on
+  all nodes; a slot that is free here but used elsewhere becomes a conflict.
+  `enroll_next_free` and the admin gesture avoid this.
+- **Timing**: one sensor command sequence per loop; writing a finger (store and read-back check)
+  blocks the loop for about 1.2–1.7 s. Nothing runs while a finger is on the sensor or an enrollment is in progress.
+- **Updates**: nodes with a different protocol version refuse each other; update all nodes and
+  `tools/growplus.py` together.
 
-## Platforms and tested hardware
+## Platforms and limits
 
 | Platform | Status |
 |---|---|
-| ESP32 family, ESP-IDF | supported, CI compile |
-| ESP32 family, Arduino | supported, CI compile |
-| ESP8266 | supported, CI compile; metadata in the sensor notepad (guest expiry in RAM only), software UART, little free heap |
+| ESP32 family, ESP-IDF / Arduino | supported, CI compile, tested on ESP32-S2 + R503 |
+| ESP8266 | supported, CI compile; metadata in the sensor notepad (guest expiry in RAM only), little free heap |
 | Host (Linux) | end-to-end tests with simulated sensors |
 
-Real hardware so far: ESP32-S2 (lolin_s2_mini) with GROW R503 modules, security level 3,
-capacity 200. Observed: 1536-byte templates (the manual says 768), 128-byte data packets,
-byte-identical transfer, and an unreliable template-to-template `Match` command (not used).
-
-## Limits
-
-- One fingerprint sensor per node; one inbound and one outbound sync session at a time.
-- Templates must be compatible between the sensors (same model and firmware).
+- One fingerprint sensor per node; the sensors must be the same model and firmware for sync.
 - Up to 1024 slots with `preferences`, 248 with `sensor_notepad`; at most 64 guest slots.
-- 16,383 versions (enrollments, deletions, claims across all nodes) before the version counter
-  must be reset (docs/protocol.md).
+- 16,383 changes (enrollments, deletions, claims across all nodes) before the version counter
+  must be reset ([docs/protocol.md](docs/protocol.md)).
 - `sensor_power_pin` of `fingerprint_grow` is not supported.
-- Nodes that are cut off from each other and change the same slot: the newer change wins.
+- Observed on R503: 1536-byte templates (the manual says 768) and an unreliable
+  template-to-template `Match` command, which is therefore not used.
 
 ## Documentation
 
 - [Architecture](docs/architecture.md): design, sync rules, conflicts, failure behaviour
 - [Protocol](docs/protocol.md): wire format, handshake, messages
 - [Security](docs/security.md): threat model, limits and residual risks
-- [Networks](docs/network.md): subnets, VLANs, routed networks, firewall rules
+- [Networks](docs/network.md): subnets, VLANs, VPNs, firewall rules
 - [Operations](docs/operations.md): rollout, backup, restore, troubleshooting
-- [Testing](docs/testing.md): unit, end-to-end and hardware test plan
-- [Kurzanleitung (Deutsch)](docs/de/anleitung.md)
+- [Testing](docs/testing.md): unit, end-to-end and hardware tests
+- [Anleitung (Deutsch)](docs/de/anleitung.md)
 
 ## License
 

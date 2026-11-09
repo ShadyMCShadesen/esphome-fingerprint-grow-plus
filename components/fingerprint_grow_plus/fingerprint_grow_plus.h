@@ -202,7 +202,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void sync_now();
   /// Delete a slot here and on all peers (tombstone).
   void delete_slot(uint16_t slot);
-  /// Delete all managed slots here and on all peers. Requires the configured code.
+  /// Delete all fingers except admins here; synced slots also on all peers. Requires the code.
   void delete_all(const std::string &code);
   /// Enroll the lowest slot that is free on this node and on all peers seen since boot.
   void enroll_next_free(uint8_t num_scans);

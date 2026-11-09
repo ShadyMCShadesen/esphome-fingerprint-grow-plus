@@ -63,23 +63,27 @@ fingerprint_grow_plus:
   id: fp_plus
   finger_sensor: finger_detected
   time_id: sntp_time
-  admin:
-  guests: "150-179"
-  on_admin_touch:
-    - fingerprint_grow.aura_led_control:
-        state: FLASHING
-        speed: 50
-        color: CYAN
-        count: 0
   on_enroll_started:
     - fingerprint_grow.aura_led_control:
         state: FLASHING
         speed: 50
         color: PURPLE
         count: 0
-  on_admin_gesture:
-    - fingerprint_grow.aura_led_control:
-        state: BREATHING
-        speed: 100
-        color: BLUE
-        count: 0
+  # Admin finger in slot 0 (touch, lift, wait 2 s): 2x = enroll next free slot,
+  # 3x + finger = delete it, 4x + finger = enroll it again, 5x = enroll a guest.
+  admin:
+    on_touch:
+      - fingerprint_grow.aura_led_control:
+          state: FLASHING
+          speed: 50
+          color: CYAN
+          count: 0
+    on_gesture:
+      - fingerprint_grow.aura_led_control:
+          state: BREATHING
+          speed: 100
+          color: BLUE
+          count: 0
+  # Guest fingers in slots 150-179, valid 7 days.
+  guests: "150-179"
+  # No sync: block: nothing leaves this node, no network port is opened.

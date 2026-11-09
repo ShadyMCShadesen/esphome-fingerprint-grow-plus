@@ -31,7 +31,7 @@ void TcpTransport::connect(const char *host, uint16_t port) {
 }
 
 void TcpTransport::dump_config() {
-  ESP_LOGCONFIG(this->tag_, "  Transport: TCP, port %u", this->port_);
+  ESP_LOGCONFIG(this->tag_, "    Transport: TCP, port %u", this->port_);
   this->listener_.dump_config();
 }
 
