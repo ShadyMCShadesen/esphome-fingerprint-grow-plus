@@ -17,14 +17,14 @@
    repository):
 
    ```bash
-   export GROWPLUS_KEY='<key from secrets.yaml>'
-   python3 tools/growplus.py backup --host <node>.local
-   python3 tools/growplus.py inspect --in <node>-<date>_<time>.fgpb
+   python3 tools/growplus.py backup  --host <node-ip> --port 18530 --key '<key>' --out <node>.fgpb --include-local
+   python3 tools/growplus.py inspect --key '<key>' --in <node>.fgpb
    ```
 
-   Without `--out` the file is named `<node>-<date>_<time>.fgpb`. On Windows (PowerShell) use
-   `$env:GROWPLUS_KEY = '<key>'` and `py tools\growplus.py …`; in `cmd.exe`
-   `set GROWPLUS_KEY=<key>`. Alternatively pass `--key-file <file>` on every system.
+   `<key>` is `fingerprint_grow_plus_key` from `secrets.yaml`. On Windows use `py tools\growplus.py`
+   with the same arguments. Instead of `--key` you can use `--key-file <file>` or the environment
+   variable `GROWPLUS_KEY`. `--include-local` needs `allow_full_backup` on the node (see below);
+   leave it out to save only the synced slots.
 
 5. **Hardware checks.** Run the compatibility tests in [testing.md](testing.md) (A1–A4).
    Nodes that already hold fingers will report **conflicts** for every slot whose template
@@ -46,7 +46,7 @@ first and add `--include-local`:
 
 ```bash
 # on the node: fingerprint_grow_plus.allow_full_backup (open for 5 minutes by default)
-python3 tools/growplus.py backup --host <node>.local --include-local
+python3 tools/growplus.py backup --host <node-ip> --port 18530 --key '<key>' --out <node>.fgpb --include-local
 ```
 
 ## Restore / rollback
@@ -56,7 +56,7 @@ python3 tools/growplus.py backup --host <node>.local --include-local
 2. Restore:
 
    ```bash
-   python3 tools/growplus.py restore --host <node>.local --in backup.fgpb [--slots 0,2,10-19]
+   python3 tools/growplus.py restore --host <node-ip> --port 18530 --key '<key>' --in <node>.fgpb [--slots 0,2,10-19]
    ```
 
 3. Restored synced slots get a new, forced version. **They replace the slot on all peers**, which

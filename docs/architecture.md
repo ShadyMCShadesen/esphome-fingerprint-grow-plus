@@ -126,7 +126,7 @@ Resolve a conflict with `resolve_conflict(slot, keep_local)`, or all of them wit
 **Slot filter:** `sync: include_slots` / `exclude_slots` define the synced slots of a node.
 Other slots are local only: not announced, not accepted and not deleted by the sync, but admin
 gestures, guests, `enroll_next_free` and `delete_all` still work on them. Excluding a range on
-all nodes but one makes it node-exclusive; `include_slots: ["99"]` shares only slot 99.
+all nodes but one makes it node-exclusive; `include_slots: ["0"]` shares only slot 0.
 
 ## Failure behaviour
 

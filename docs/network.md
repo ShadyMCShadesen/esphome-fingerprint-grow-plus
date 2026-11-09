@@ -42,10 +42,11 @@ fingerprint_grow_plus:
    Only established connections need to come back; stateful firewalls handle that.
 3. Set `allowed_networks` to the node subnets.
 4. NAT between nodes works if the published port is set per peer (`host:port`).
-5. Over a VPN (e.g. WireGuard on a remote node) the remote node's tunnel address may arrive
-   instead of an address from the local subnet; add it to `allowed_networks` on the other nodes.
-   One side connecting is enough: a session syncs both directions, so the remote node may list
-   the others as peers without being listed itself (it then drives the sync at its `interval`).
+5. Over a VPN a node may arrive with its tunnel address instead of an address from the local
+   subnet; include that address in `allowed_networks` on the other nodes.
+6. One side connecting is enough: a session syncs both directions. A node that is not reachable
+   from the others (e.g. behind NAT) can list them as peers without being listed itself; it then
+   drives the sync with its own `interval`, `at_boot` and `after_change`.
 
 Nothing in the sync logic changes when you move from one subnet to routed networks. Only the
 addresses in `peers` and the firewall are affected.

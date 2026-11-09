@@ -151,17 +151,15 @@ Geräten.
   `keep_local: false` = den Finger der anderen übernehmen.
 - **Nur einzelne Slots synchronisieren:** `include_slots` / `exclude_slots` bestimmen, was
   synchronisiert wird. Alle anderen Slots bleiben lokal; Admin-Gesten, Gäste und `delete_all`
-  funktionieren dort trotzdem. Beispiel: ein Gerät an einem anderen Standort teilt nur den
-  Admin-Finger 99:
+  funktionieren dort trotzdem.
 
   ```yaml
   fingerprint_grow_plus:
-    admin:
-      slots: [99]
     sync:
       key: !secret fingerprint_grow_plus_key
-      peers: [192.168.10.21, 192.168.10.22]   # über VPN/Router kein mDNS: IP oder DNS-Name
-      include_slots: ["99"]
+      peers: [geraet-1.local, geraet-2.local]
+      exclude_slots: ["180-199"]   # z. B. eigene Finger, die auf jedem Gerät lokal bleiben
+      # include_slots: ["0"]       # oder: nur Slot 0 teilen (z. B. den Admin-Finger), Rest lokal
   ```
 
 - **Wann synchronisiert wird:** nach dem Booten (`at_boot`), etwa 2 s nach einer eigenen Änderung
@@ -209,43 +207,43 @@ Details: [network.md](../network.md).
 `tools/growplus.py` (Python 3, nur Standardbibliothek) liest und schreibt die Finger eines Geräts
 über die Sync-Verbindung. Die Backup-Dateien sind mit dem Schlüssel verschlüsselt.
 
-Linux / macOS:
+Vollständige Befehle (`<Schlüssel>` = Wert von `fingerprint_grow_plus_key` aus der `secrets.yaml`):
 
 ```bash
-export GROWPLUS_KEY='<Schlüssel>'
-python3 tools/growplus.py backup  --host <geraet>.local
-python3 tools/growplus.py backup  --host <geraet>.local --include-local   # auch nicht synchronisierte
-python3 tools/growplus.py inspect --in <geraet>-<datum>_<uhrzeit>.fgpb
-# am Gerät zuerst fingerprint_grow_plus.allow_restore auslösen, dann:
-python3 tools/growplus.py restore --host <geraet>.local --in <datei>.fgpb
+# Linux / macOS
+python3 tools/growplus.py backup  --host 192.168.10.21 --port 18530 --key '<Schlüssel>' --out geraet-1.fgpb --include-local
+python3 tools/growplus.py inspect --key '<Schlüssel>' --in geraet-1.fgpb
+python3 tools/growplus.py restore --host 192.168.10.21 --port 18530 --key '<Schlüssel>' --in geraet-1.fgpb
 ```
-
-Windows (PowerShell):
 
 ```powershell
-$env:GROWPLUS_KEY = '<Schlüssel>'
-py tools\growplus.py backup  --host <geraet>.local
-py tools\growplus.py backup  --host <geraet>.local --include-local
-py tools\growplus.py inspect --in <geraet>-<datum>_<uhrzeit>.fgpb
-py tools\growplus.py restore --host <geraet>.local --in <datei>.fgpb
+# Windows (PowerShell)
+py tools\growplus.py backup  --host 192.168.10.21 --port 18530 --key '<Schlüssel>' --out geraet-1.fgpb --include-local
+py tools\growplus.py inspect --key '<Schlüssel>' --in geraet-1.fgpb
+py tools\growplus.py restore --host 192.168.10.21 --port 18530 --key '<Schlüssel>' --in geraet-1.fgpb
 ```
 
-- `backup` sichert die synchronisierten Slots. Mit `--include-local` (oder `--all`) zusätzlich die
-  Slots, die nicht synchronisiert werden (außerhalb von `include_slots`). Die gibt das Gerät nur
-  heraus, nachdem am Gerät `fingerprint_grow_plus.allow_full_backup` ausgelöst wurde (5 min).
-- `restore` braucht vorher `fingerprint_grow_plus.allow_restore`. Synchronisierte Slots werden
-  dabei auf allen Geräten ersetzt, lokale Slots bleiben lokal.
+- `--host`: IP-Adresse oder DNS-Name des Geräts (`.local` nur, wenn der PC mDNS auflöst);
+  `--port` nur nötig, wenn das Gerät nicht 18530 verwendet.
+- `--key`: statt des Schlüssels in der Befehlszeile geht auch `--key-file <datei>` oder die
+  Umgebungsvariable `GROWPLUS_KEY`.
+- `--out`: Name der Backup-Datei (Pflicht).
+- `--include-local` (oder `--all`): sichert zusätzlich die Slots, die nicht synchronisiert werden
+  (außerhalb von `include_slots`). Die gibt das Gerät nur heraus, nachdem am Gerät
+  `fingerprint_grow_plus.allow_full_backup` ausgelöst wurde (5 min). Ohne die Option werden nur die
+  synchronisierten Slots gesichert.
+- `--slots 0,2,10-19` beschränkt Backup oder Restore auf einzelne Slots.
+- `restore` braucht vorher `fingerprint_grow_plus.allow_restore` am Gerät. Synchronisierte Slots
+  werden dabei auf allen Geräten ersetzt, lokale Slots bleiben lokal.
 - Das Tool verbindet sich über den Sync-Port, das Gerät braucht also einen `sync:`-Block. Für ein
   einzelnes Gerät reicht ein `sync:`-Block nur mit `key` (ohne `peers`): Er öffnet den Port für
   das Tool und synchronisiert mit niemandem.
 
-Ohne `--out` heißt die Datei `<geraet>-<datum>_<uhrzeit>.fgpb`. Statt der Umgebungsvariable geht
-auf jedem System auch `--key-file <datei>`. Backup-Dateien enthalten biometrische Daten: nie in
-ein Repository legen.
+Backup-Dateien enthalten biometrische Daten: nie in ein Repository legen.
 
 ## Entitäten
 
-Der Text-Sensor `occupied_slots` zeigt die belegten Slots als Bereiche, z. B. `0, 2-5, 99, 150-151`:
+Der Text-Sensor `occupied_slots` zeigt die belegten Slots als Bereiche, z. B. `0, 2-5, 17, 150-151`:
 
 ```yaml
 text_sensor:

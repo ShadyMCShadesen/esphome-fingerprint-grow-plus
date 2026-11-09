@@ -190,17 +190,15 @@ fingerprint_grow_plus:
   sync. Without regular syncs `enroll_next_free` may not know which slots the others use and can
   pick one that is taken elsewhere (reported as a conflict).
 - **Only some slots**: `include_slots` / `exclude_slots` decide what is synced. Slots outside stay
-  on the node; admin gestures, guests and `delete_all` still work there. Example: a node at
-  another site that shares only the admin finger:
+  on the node; admin gestures, guests and `delete_all` still work there.
 
   ```yaml
   fingerprint_grow_plus:
-    admin:
-      slots: [99]
     sync:
       key: !secret fingerprint_grow_plus_key
-      peers: [192.168.10.21, 192.168.10.22]   # mDNS does not cross VPNs or routers: use IPs/DNS
-      include_slots: ["99"]
+      peers: [reader-garden.local, reader-garage.local]
+      exclude_slots: ["180-199"]   # e.g. node-exclusive fingers that stay on each node
+      # include_slots: ["0"]       # or: share only slot 0 (e.g. the admin finger), keep the rest local
   ```
 
 - **Security**: 256-bit pre-shared key, mutual authentication, ChaCha20 + HMAC-SHA256, replay
@@ -223,17 +221,31 @@ conflicts instead of guessing. Resolve them once:
 ### Backup and restore
 
 `tools/growplus.py` (Python 3, standard library only) reads and writes the fingers of a node over
-the sync connection; backup files are encrypted with the key.
+the sync connection; backup files are encrypted with the key. Complete commands
+(`<key>` = the value of `fingerprint_grow_plus_key` from `secrets.yaml`):
 
 ```bash
-export GROWPLUS_KEY='<key>'                                    # PowerShell: $env:GROWPLUS_KEY = '<key>'
-python3 tools/growplus.py backup --host reader-garden.local     # -> reader-garden-<date>_<time>.fgpb
-python3 tools/growplus.py backup --host reader-garden.local --include-local
-python3 tools/growplus.py restore --host reader-garden.local --in <file>.fgpb
+# Linux / macOS
+python3 tools/growplus.py backup  --host 192.168.10.21 --port 18530 --key '<key>' --out reader-garden.fgpb --include-local
+python3 tools/growplus.py inspect --key '<key>' --in reader-garden.fgpb
+python3 tools/growplus.py restore --host 192.168.10.21 --port 18530 --key '<key>' --in reader-garden.fgpb
 ```
 
-- `backup` saves the synced slots. `--include-local` also saves the slots that are not synced
-  (outside `include_slots`); the node hands them out only after `fingerprint_grow_plus.allow_full_backup`.
+```powershell
+# Windows (PowerShell)
+py tools\growplus.py backup  --host 192.168.10.21 --port 18530 --key '<key>' --out reader-garden.fgpb --include-local
+py tools\growplus.py inspect --key '<key>' --in reader-garden.fgpb
+py tools\growplus.py restore --host 192.168.10.21 --port 18530 --key '<key>' --in reader-garden.fgpb
+```
+
+- `--host`: IP address or DNS name of the node (`.local` works where your PC resolves mDNS);
+  `--port` only if the node does not use 18530.
+- `--key`: instead of the key on the command line you can use `--key-file <file>` or the
+  environment variable `GROWPLUS_KEY`.
+- `--include-local`: also save the slots that are not synced (outside `include_slots`). The node
+  hands them out only after `fingerprint_grow_plus.allow_full_backup` (open for 5 minutes).
+  Without it only the synced slots are saved.
+- `--slots 0,2,10-19` limits backup or restore to some slots.
 - `restore` needs `fingerprint_grow_plus.allow_restore` on the node first. Restored synced slots
   replace the slot on all nodes; local-only slots stay local.
 - The tool connects over the sync port, so the node needs a `sync:` block. For a single node
@@ -334,7 +346,7 @@ Lambdas: `id(fp_plus).health()`, `next_free_slot()`, `slot_expiry(slot)`, `confl
 ```yaml
 text_sensor:
   - platform: fingerprint_grow_plus
-    occupied_slots: {name: Occupied slots}   # e.g. "0, 2-5, 99, 150-151"
+    occupied_slots: {name: Occupied slots}   # e.g. "0, 2-5, 17, 150-151"
     status: {name: Sync status}
 sensor:
   - platform: fingerprint_grow_plus
