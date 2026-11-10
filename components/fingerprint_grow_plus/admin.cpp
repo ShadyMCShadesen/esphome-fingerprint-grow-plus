@@ -12,6 +12,9 @@ namespace esphome::fingerprint_grow_plus {
 static const char *const TAG = "fingerprint_grow_plus.admin";
 static constexpr uint32_t EXPIRY_CHECK_INTERVAL_MS = 30000;
 static constexpr size_t EXPIRY_PREF_CHUNK = 64;
+// The touch output of the sensor may drop for a moment while a finger rests on it; shorter gaps
+// than this do not count as "lifted".
+static constexpr uint32_t FINGER_OFF_DEBOUNCE_MS = 500;
 
 static inline bool elapsed(uint32_t now, uint32_t since, uint32_t duration) { return now - since >= duration; }
 
@@ -39,7 +42,7 @@ bool FingerprintGrowPlusComponent::is_admin_slot(uint16_t slot) const {
 }
 
 bool FingerprintGrowPlusComponent::is_admin_busy() const {
-  return this->admin_hits_ > 0 || this->armed_ != AdminArm::NONE;
+  return this->admin_hits_ > 0 || this->armed_ != AdminArm::NONE || this->hold_lock_;
 }
 
 uint8_t FingerprintGrowPlusComponent::health() const {
@@ -76,6 +79,13 @@ void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id, uint16_t conf
   }
   if (!admin)
     return;
+  if (this->hold_lock_) {
+    // The admin finger is still (or again) on the sensor after a hold: the sensor matched it a
+    // second time. That is part of the hold, never a new touch, so it triggers nothing.
+    this->admin_quiet_since_ms_ = now;
+    ESP_LOGD(TAG, "Admin finger matched again during a hold: ignored");
+    return;
+  }
 
   if (this->admin_hits_ > 0 && elapsed(now, this->admin_quiet_since_ms_, this->gesture_timeout_ms_))
     this->admin_hits_ = 0;
@@ -103,10 +113,25 @@ void FingerprintGrowPlusComponent::admin_loop_() {
     this->armed_ = AdminArm::NONE;
     this->admin_cancelled_cb_.call();
   }
+  bool finger_on = false;
+  if (this->finger_sensor_ != nullptr) {
+    if (this->finger_sensor_->state)
+      this->finger_on_ms_ = now;
+    finger_on = this->finger_sensor_->has_state() && !elapsed(now, this->finger_on_ms_, FINGER_OFF_DEBOUNCE_MS);
+  }
+  if (this->hold_lock_) {
+    // After a hold nothing is counted until the finger has been off the sensor for `window`.
+    if (finger_on) {
+      this->admin_quiet_since_ms_ = now;
+    } else if (elapsed(now, this->admin_quiet_since_ms_, this->gesture_timeout_ms_)) {
+      this->hold_lock_ = false;
+      ESP_LOGD(TAG, "Admin hold finished");
+    }
+    return;
+  }
   if (this->admin_hits_ == 0)
     return;
 
-  const bool finger_on = this->finger_sensor_ != nullptr && this->finger_sensor_->state;
   // The pause that completes a gesture starts when the finger is lifted, not at the match: on real
   // sensors the next touch is matched 1.5-3 s after the previous match (lift, touch, image, search),
   // and a finger lying on the sensor keeps the gesture open until the sensor reports the match.
@@ -116,6 +141,8 @@ void FingerprintGrowPlusComponent::admin_loop_() {
     if (elapsed(now, this->admin_last_ms_, this->hold_ms_)) {
       this->admin_hits_ = 0;
       this->admin_hold_possible_ = false;
+      this->hold_lock_ = true;  // a hold never ends in a gesture or access, even if matched again
+      this->admin_quiet_since_ms_ = now;
       ESP_LOGI(TAG, "Admin finger held: status %u", this->health());
       this->admin_hold_cb_.call();
     }

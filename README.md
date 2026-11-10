@@ -105,6 +105,10 @@ on the sensor for 2 s (`window`):
 Showing an admin finger instead of the target finger, or no finger within 10 s
 (`target_timeout`), cancels the action.
 
+**Holding** only shows the status: while the finger rests on the sensor and until it has been off
+for `window`, further matches of the admin finger are ignored, so a hold never ends in a gesture
+or in `on_access`. Short drop-outs (< 0.5 s) of the touch signal do not count as lifting.
+
 **Protection**: admin slots are never chosen as a free slot, cannot be deleted by a gesture or by
 `fingerprint_grow_plus.delete`, and survive `delete_all`. Only `fingerprint_grow_plus.delete_admin`
 with the delete code removes one. With sync, use the same admin slots on all nodes.

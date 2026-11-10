@@ -32,7 +32,8 @@ End-to-end scenarios:
 8. Hostile peers are cut off (handshake timeout, duplicate manifest).
 9. An admin deletes a finger on all nodes by presenting it after 3 touches.
 10. A stand-alone node (no `sync:` block) enrolls with the admin gesture; with
-    `access: delayed` a single admin touch fires `on_access`, two touches do not.
+    `access: delayed` a single admin touch fires `on_access`, two touches do not, and holding the
+    admin finger (even with a second match during the hold) shows the status without access.
 11. A node that syncs only the admin slot receives it, keeps its local fingers out of the sync,
     enrolls into a local slot with the admin gesture and reports `occupied_slots`. A default backup
     holds only the synced slot, `--include-local` is refused without `allow_full_backup` and

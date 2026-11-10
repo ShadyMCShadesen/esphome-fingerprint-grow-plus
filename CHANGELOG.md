@@ -5,6 +5,12 @@ versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Holding the admin finger with `access:` could open the door: the sensor matched the resting
+  finger a second time, which counted as a new single touch. After a hold, matches are ignored
+  until the finger has been off the sensor for `window`; short drop-outs of the touch signal
+  (< 0.5 s) no longer count as lifting.
+
 ## [0.2.0] - 2026-11-09
 
 Complete rework of 0.1.0. Not compatible with 0.1.0: update all nodes and the tool together and

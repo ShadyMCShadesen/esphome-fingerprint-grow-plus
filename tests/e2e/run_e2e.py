@@ -113,6 +113,9 @@ sensor:
       name: Peers reachable
     conflict_count:
       name: Sync conflicts
+binary_sensor:
+  - platform: template
+    id: finger_detected
 text_sensor:
   - platform: fingerprint_grow_plus
     status:
@@ -126,6 +129,7 @@ fingerprint_grow_plus:
   fingerprint_capacity_sensor: fp_capacity
   delete_all_code: TEST_ALL
   time_id: host_time
+  finger_sensor: finger_detected
   on_enroll_started:
     - logger.log:
         format: "TEST-EVENT enroll_started %u"
@@ -150,6 +154,8 @@ fingerprint_grow_plus:
       - logger.log:
           format: "TEST-EVENT admin_waiting %s"
           args: [action.c_str()]
+    on_hold:
+      - logger.log: "TEST-EVENT admin_hold"
     on_cancelled:
       - logger.log: "TEST-EVENT admin_cancelled"
     on_done:
@@ -176,6 +182,8 @@ interval:
           if (c == "delete") id(fp_plus).delete_slot(a);
           else if (c == "resolve") id(fp_plus).resolve_conflict(a, b != 0);
           else if (c == "sync") id(fp_plus).sync_now();
+          else if (c == "finger_on") id(finger_detected).publish_state(true);
+          else if (c == "finger_off") id(finger_detected).publish_state(false);
           else if (c == "delete_all") id(fp_plus).delete_all("TEST_ALL");
           else if (c == "delete_all_wrong") id(fp_plus).delete_all("nope");
           else if (c == "allow_restore") id(fp_plus).allow_restore(120);
@@ -585,6 +593,24 @@ def main():
                                   lambda: c.log("node-f").count("TEST-EVENT admin_access") == 1, 1))
         results.append(wait_until("the stand-alone finger stays local",
                                   lambda: all(c.slots(n).get(1) != "zoe" for n in ("node-a", "node-b", "node-c")), 1))
+
+        print("== Scenario 10b: holding the admin finger shows the status and never opens")
+        access_before = c.log("node-f").count("TEST-EVENT admin_access")
+        time.sleep(4)
+        c.cmd("node-f", "finger_on")
+        time.sleep(0.5)
+        c.touch("node-f", "admin")
+        results.append(wait_until("hold detected after 3 s", lambda: "TEST-EVENT admin_hold" in c.log("node-f"), 10))
+        c.touch("node-f", "admin")  # the sensor matches the resting finger a second time
+        time.sleep(2)
+        c.cmd("node-f", "finger_off")
+        time.sleep(5)
+        results.append(wait_until("a hold (with a second match) triggers no access",
+                                  lambda: c.log("node-f").count("TEST-EVENT admin_access") == access_before
+                                  and "matched again during a hold: ignored" in c.log("node-f"), 1))
+        c.touch("node-f", "admin")
+        results.append(wait_until("afterwards a single short touch opens again",
+                                  lambda: c.log("node-f").count("TEST-EVENT admin_access") == access_before + 1, 10))
 
         print("== Scenario 11: node syncing only the admin slot, local features on all other slots")
         results.append(wait_until("node-g received the admin finger (slot 0) from A",

@@ -55,6 +55,10 @@ dem Sensor lag:
 Zeigt man statt des Zielfingers einen Admin-Finger oder 10 s lang gar keinen Finger, wird die
 Aktion abgebrochen.
 
+**Halten** zeigt nur den Status: Solange der Finger aufliegt und bis er `window` lang weg ist,
+werden weitere Erkennungen des Admin-Fingers ignoriert. Ein Halten endet also nie in einer Geste
+oder in `on_access` (Tür). Kurze Aussetzer des Touch-Signals (< 0,5 s) zählen nicht als Abheben.
+
 **Schutz:** Admin-Slots werden nie als freier Slot vergeben, lassen sich nicht per Geste oder
 `fingerprint_grow_plus.delete` löschen und bleiben bei `delete_all` stehen. Entfernen nur mit
 `fingerprint_grow_plus.delete_admin` und dem Lösch-Code. Mit Sync auf allen Geräten dieselben

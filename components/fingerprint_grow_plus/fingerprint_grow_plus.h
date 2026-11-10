@@ -411,6 +411,8 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint32_t admin_last_ms_{0};        // last admin match (hold detection)
   uint32_t admin_quiet_since_ms_{0};  // last admin match or last moment a finger was on the sensor
   bool admin_hold_possible_{false};
+  bool hold_lock_{false};      // after a hold: ignore admin matches until the finger is gone
+  uint32_t finger_on_ms_{0};   // last time finger_sensor was on (debounced release)
   AdminArm armed_{AdminArm::NONE};
   uint32_t armed_until_ms_{0};
   uint16_t pending_guest_slot_{NO_SLOT};
