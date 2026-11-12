@@ -81,10 +81,18 @@ session may also name local-only slots; the `TEMPLATE` answer then carries `meta
 
 ## Version counter reset
 
-Versions are 14 bit (max 16383). Every enrollment, deletion and conflict resolution in the
-cluster consumes one version. The `versions_left` sensor shows the remaining versions, and the log
-warns below 1000. If the limit is ever reached:
+Versions are 14 bit (max 16383). Every enrollment, deletion, rename, guest use and conflict
+resolution in the cluster consumes one version. The `versions_left` sensor shows the remaining
+versions, and the log warns below 1000.
 
-1. Back up one node with `tools/growplus.py backup`.
-2. Erase the metadata on all nodes (flash with `metadata_storage` switched or wipe preferences).
-3. Restore.
+To start again, run `fingerprint_grow_plus.reset_versions` with the delete code on **one** node:
+
+1. The node refuses unless its last sync round reached every peer and there are no conflicts
+   (the reset drops the tombstones: a node that missed a deletion would bring the finger back).
+2. It raises its **epoch** by one, gives every present slot version 1, drops the tombstones and
+   starts a sync round.
+3. Every manifest carries the epoch. A node that sees a higher epoch does the same (adopts the
+   epoch, versions 1, no tombstones) before comparing anything. Manifests with a lower epoch are
+   ignored, so old high versions cannot come back. Nodes that are offline follow when they return.
+
+The epoch is stored in flash (preferences backend) and only written by a reset.

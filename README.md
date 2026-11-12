@@ -455,6 +455,7 @@ fingerprint_grow_plus:
 | `claim_all_slots` | – | this node's fingers replace the same slots on all nodes |
 | `resolve_conflict` | `slot`, `keep_local` | `true`: this node's finger wins; `false`: take the peer's |
 | `resolve_all_conflicts` | `keep_local` | the same for all current conflicts |
+| `reset_versions` | `code` | start the sync versions again at 1 on all nodes (needs a round that reached every peer, no conflicts) |
 | `allow_restore` | `duration` (5min) | accept a restore from `tools/growplus.py` |
 | `allow_full_backup` | `duration` (5min) | let `tools/growplus.py backup --include-local` read the slots that are not synced |
 | `register_failed_attempt` | – | count a failed attempt for `lockout:` (unmatched scans count by themselves) |
@@ -511,9 +512,11 @@ binary_sensor:
 
 - One fingerprint sensor per node; the sensors must be the same model and firmware for sync.
 - Up to 1024 slots with `preferences`, 248 with `sensor_notepad`; at most 64 guest slots.
-- 16,383 changes (enrollments, deletions, claims across all nodes) before the version counter
-  must be reset ([docs/protocol.md](docs/protocol.md)); the `versions_left` sensor shows how many
-  are left, and the log warns below 1000.
+- 16,383 synced changes (enrollments, deletions, renames, guest uses, claims across all nodes)
+  before the version counter must be reset; the `versions_left` sensor shows how many are left,
+  and the log warns below 1000. `fingerprint_grow_plus.reset_versions` (with the delete code, on
+  one node) starts again at 1 on all nodes; it needs a last round that reached every peer and no
+  conflicts ([docs/protocol.md](docs/protocol.md)).
 - Templates must have the same size on all nodes (same sensor model and firmware); a template of
   a different size is refused with `Incompatible template from …`.
 - `sensor_power_pin` of `fingerprint_grow` is not supported.

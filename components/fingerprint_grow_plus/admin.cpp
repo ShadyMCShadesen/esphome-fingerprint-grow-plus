@@ -423,6 +423,10 @@ void FingerprintGrowPlusComponent::load_expiries_() {
     for (size_t i = 0; i < USES_PREF_CHUNK && c * USES_PREF_CHUNK + i < this->capacity_; i++)
       this->uses_[c * USES_PREF_CHUNK + i] = chunk[i];
   }
+  this->epoch_pref_ =
+      global_preferences->make_preference<uint16_t>(fnv1_hash("fingerprint_grow_plus_epoch") ^ this->node_id_, true);
+  if (!this->epoch_pref_.load(&this->epoch_))
+    this->epoch_ = 0;
   const uint32_t names_base = fnv1_hash("fingerprint_grow_plus_names") ^ this->node_id_;
   for (size_t c = 0; c * NAMES_PREF_CHUNK < this->capacity_; c++) {
     this->names_prefs_.push_back(global_preferences->make_preference<NameBlock>(names_base + c, true));
@@ -450,6 +454,10 @@ void FingerprintGrowPlusComponent::save_expiries_() {
     for (size_t i = 0; i < USES_PREF_CHUNK && c * USES_PREF_CHUNK + i < this->capacity_; i++)
       chunk[i] = this->uses_[c * USES_PREF_CHUNK + i];
     this->uses_prefs_[c].save(&chunk);
+  }
+  if (this->epoch_dirty_) {
+    this->epoch_dirty_ = false;
+    this->epoch_pref_.save(&this->epoch_);
   }
   if (!this->names_dirty_)
     return;

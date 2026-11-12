@@ -1025,6 +1025,49 @@ void FingerprintGrowPlusComponent::job_move_(Job &job) {
   this->request_change_round_(PUSH_DELAY_MS);
 }
 
+void FingerprintGrowPlusComponent::reset_versions(const std::string &code) {
+  if (this->delete_all_code_ == nullptr || this->delete_all_code_[0] == '\0' || code != this->delete_all_code_) {
+    ESP_LOGW(TAG, "Version reset refused: wrong or unconfigured code");
+    return;
+  }
+  // Tombstones are dropped by the reset. A node that missed a deletion would bring the finger
+  // back, so the last round must have reached every peer, and nothing may be in conflict.
+  const char *why = nullptr;
+  if (!this->network_)
+    why = "no sync: block";
+  else if (this->rounds_done_ == 0 || this->round_active_)
+    why = "wait until a sync round has finished";
+  else if (!this->last_round_ok_)
+    why = "the last sync round did not reach every peer";
+  else if (this->conflict_count() > 0)
+    why = "resolve the conflicts first";
+  if (why != nullptr) {
+    ESP_LOGW(TAG, "Version reset refused: %s", why);
+    return;
+  }
+  this->rebase_(this->epoch_ + 1);
+  ESP_LOGW(TAG, "Version reset: epoch %u, versions start again at 1; peers follow", this->epoch_);
+  this->request_round_(0);
+}
+
+void FingerprintGrowPlusComponent::rebase_(uint16_t epoch) {
+  this->epoch_ = epoch;
+  for (uint16_t slot = 0; slot < this->capacity_; slot++) {
+    if (!this->managed_(slot))
+      continue;
+    if (meta_present(this->meta_[slot])) {
+      this->meta_[slot] = meta_pack(SLOT_PRESENT, 1);
+    } else {
+      this->meta_[slot] = meta_pack(SLOT_NONE, 0);  // tombstones are dropped
+    }
+  }
+  this->clock_ = 1;
+  this->versions_low_warned_ = false;
+  this->epoch_dirty_ = true;
+  this->mark_dirty_();
+  this->publish_diagnostics_();
+}
+
 void FingerprintGrowPlusComponent::delete_all(const std::string &code) {
   if (this->delete_all_code_ == nullptr || this->delete_all_code_[0] == '\0' || code != this->delete_all_code_) {
     ESP_LOGW(TAG, "delete_all refused: wrong or unconfigured code");
@@ -1485,6 +1528,18 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
         this->end_session_(s, false, "manifest sent twice");
         return;
       }
+      if (epoch > this->epoch_ && page == 0) {
+        // A peer reset the versions (reset_versions): follow it before comparing anything.
+        ESP_LOGW(TAG, "Version reset by peer %08" PRIX32 " (epoch %u): versions start again at 1",
+                 s.channel.peer_id(), epoch);
+        this->rebase_(epoch);
+      }
+      if (epoch < this->epoch_) {
+        // The peer has not seen the reset yet: ignore its old versions; it follows our manifest.
+        if (flags & 1)
+          s.manifest_received = true;
+        break;
+      }
       s.manifest_entries += count;
       if (s.manifest_entries > (size_t) this->capacity_ + MANIFEST_ENTRIES_PER_PAGE) {
         this->end_session_(s, false, "manifest larger than the slot range");
@@ -1831,6 +1886,7 @@ void FingerprintGrowPlusComponent::run_round_() {
   }
 #endif
   this->last_round_ok_ = this->round_failures_ == 0;
+  this->rounds_done_++;
   if (this->round_failures_ == 0) {
 #ifdef USE_SENSOR
 #ifdef USE_TIME

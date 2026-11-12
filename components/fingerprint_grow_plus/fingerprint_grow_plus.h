@@ -273,6 +273,9 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void sync_now();
   /// Delete a slot here and on all peers (tombstone).
   void delete_slot(uint16_t slot);
+  /// Start the slot versions again at 1 on all nodes (epoch + 1). Requires the code, a last round
+  /// that reached every peer, and no conflicts.
+  void reset_versions(const std::string &code);
   /// Delete all fingers except admins here; synced slots also on all peers. Requires the code.
   void delete_all(const std::string &code);
   /// Enroll the lowest slot that is free on this node and on all peers seen since boot.
@@ -573,6 +576,9 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint32_t pending_guest_expiry_{0};
   uint32_t last_expiry_check_ms_{0};
   bool last_round_ok_{true};
+  uint32_t rounds_done_{0};
+  bool epoch_dirty_{false};
+  void rebase_(uint16_t epoch);
   std::vector<uint32_t> expires_;
   std::vector<uint8_t> uses_;                  // guest uses left per slot, 0 = unlimited
   std::map<uint16_t, std::string> names_;      // only slots that have a name use memory
@@ -581,6 +587,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   std::vector<ESPPreferenceObject> uses_prefs_;
   std::vector<ESPPreferenceObject> names_prefs_;
   bool names_dirty_{false};
+  ESPPreferenceObject epoch_pref_;
   uint32_t restore_until_ms_{0};
   bool restore_open_{false};
   uint32_t full_backup_until_ms_{0};

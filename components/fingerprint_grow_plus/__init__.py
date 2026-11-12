@@ -825,6 +825,13 @@ _simple("reset_lockout", "reset_lockout()")
 # --- sync ------------------------------------------------------------------------------
 
 _simple("sync", "sync_now()")
+_action(
+    "reset_versions",
+    cv.maybe_simple_value(
+        {_PARENT: _PARENT_ID, cv.Required(CONF_CODE): cv.templatable(cv.string)}, key=CONF_CODE
+    ),
+    automation.ApplyField(CONF_CODE, "reset_versions", cg.std_string),
+)
 _simple("claim_all_slots", "claim_all_slots()")
 _action(
     "resolve_conflict",

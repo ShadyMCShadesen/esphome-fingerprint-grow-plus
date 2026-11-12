@@ -367,6 +367,12 @@ text_sensor:
       name: Belegte Plätze
 ```
 
+**Versions-Reset:** Jede synchronisierte Änderung (Einlernen, Löschen, Umbenennen, Gast-Nutzung)
+verbraucht eine Version, maximal 16383. `fingerprint_grow_plus.reset_versions` mit dem Lösch-Code
+auf **einem** Gerät setzt alle Geräte auf Version 1 zurück. Das geht nur, wenn der letzte Abgleich
+dieses Geräts alle anderen erreicht hat und es keine Konflikte gibt; sonst lehnt es mit Begründung
+im Log ab. Geräte, die offline waren, ziehen nach, sobald sie wieder da sind.
+
 Für den Sync gibt es außerdem `unreachable_peers` (Text: welche Geräte im letzten Abgleich nicht
 erreicht wurden und warum, `-` wenn alle erreicht wurden) und `versions_left` (wie viele
 synchronisierte Änderungen bis zum nötigen Versions-Reset übrig sind, maximal 16383; unter 1000

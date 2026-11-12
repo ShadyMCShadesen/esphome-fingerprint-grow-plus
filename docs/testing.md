@@ -52,7 +52,9 @@ End-to-end scenarios:
 17. A guest with 2 uses: the remaining uses reach the peers, the last use (on another node)
     deletes it everywhere. A finger moved from one slot to another follows on all nodes; admin
     slots cannot be moved.
-18. `SetPwd` is never sent to any sensor.
+18. Version reset: refused on a node whose last round missed a peer; on another node it resets
+    all nodes, keeps every finger in its slot, creates no conflict, and later changes propagate.
+19. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
 `fingerprint_grow` and `fingerprint_grow_plus` with synthetic templates (no real biometric data).

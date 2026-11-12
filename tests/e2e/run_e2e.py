@@ -250,6 +250,7 @@ interval:
           else if (c == "enroll_guest_uses") id(fp_plus).enroll_guest(2, 600, "", a);
           else if (c == "showuses") ESP_LOGD("test", "TEST-EVENT uses %d %u", a, id(fp_plus).slot_uses_left(a));
           else if (c == "move") id(fp_plus).move_slot(a, b);
+          else if (c == "reset_versions") id(fp_plus).reset_versions("TEST_ALL");
           else if (c == "allowed") ESP_LOGD("test", "TEST-EVENT allowed %d %d", a, id(fp_plus).is_allowed(a) ? 1 : 0);
           else if (c == "finger_on") id(finger_detected).publish_state(true);
           else if (c == "finger_off") id(finger_detected).publish_state(false);
@@ -929,6 +930,32 @@ def main():
         c.touch("node-c", "eve")  # slot 150 on C is in the duress range
         results.append(wait_until("the duress finger fires on_duress",
                                   lambda: "TEST-EVENT duress 150" in c.log("node-c"), 15))
+
+        print("== Scenario 14: version reset")
+        c.cmd("node-a", "reset_versions")
+        results.append(wait_until("A may not reset: its last round did not reach node D (wrong key)",
+                                  lambda: "Version reset refused: the last sync round did not reach every peer"
+                                  in c.log("node-a"), 10))
+        before = {n: c.slots(n) for n in ("node-a", "node-b", "node-c")}
+        conflicts_before = sum(c.log(n).count("CONFLICT in slot") for n in ("node-a", "node-b", "node-c"))
+        c.cmd("node-b", "sync")
+        time.sleep(10)
+        c.cmd("node-b", "reset_versions")
+        results.append(wait_until("B resets (epoch 1), A and C follow",
+                                  lambda: "Version reset: epoch 1" in c.log("node-b")
+                                  and "Version reset by peer" in c.log("node-a")
+                                  and "Version reset by peer" in c.log("node-c"), 60))
+        results.append(wait_until("versions_left is back near the maximum on B",
+                                  lambda: "Sync versions left: 16382" in c.log("node-b"), 10))
+        c.cmd("node-a", "sync")
+        time.sleep(20)
+        results.append(wait_until("after the reset the same fingers are in the same slots, no new conflicts",
+                                  lambda: {n: c.slots(n) for n in ("node-a", "node-b", "node-c")} == before
+                                  and sum(c.log(n).count("CONFLICT in slot") for n in ("node-a", "node-b", "node-c"))
+                                  == conflicts_before, 30))
+        c.cmd("node-b", "delete 33")
+        results.append(wait_until("after the reset changes propagate again (deletion on B reaches A and C)",
+                                  lambda: all(33 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 60))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))
