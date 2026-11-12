@@ -253,7 +253,17 @@ void FingerprintGrowPlusComponent::publish_occupied_() {
 #endif
 
 void FingerprintGrowPlusComponent::publish_diagnostics_() {
+  const uint16_t left = MAX_VERSION > this->clock_ ? MAX_VERSION - this->clock_ : 0;
+  if (left < 1000 && !this->versions_low_warned_ && this->network_) {
+    this->versions_low_warned_ = true;
+    ESP_LOGW(TAG, "Only %u sync versions left; plan a version reset (docs/protocol.md)", left);
+  }
 #ifdef USE_SENSOR
+  if (this->versions_left_sensor_ != nullptr &&
+      (!this->versions_left_sensor_->has_state() || this->versions_left_sensor_->state != left)) {
+    ESP_LOGD(TAG, "Sync versions left: %u", left);
+    this->versions_left_sensor_->publish_state(left);
+  }
   if (this->error_count_sensor_ != nullptr)
     this->error_count_sensor_->publish_state(this->error_count_);
   if (this->conflict_count_sensor_ != nullptr)
@@ -542,6 +552,11 @@ void FingerprintGrowPlusComponent::job_hash_(Job &job) {
   uint8_t digest[32];
   crypto::sha256(data.data(), data.size(), digest);
   ESP_LOGD(TAG, "Slot %u indexed (template %u bytes)", slot, (unsigned) data.size());
+  if (this->template_size_ != data.size()) {
+    if (this->template_size_ != 0)
+      ESP_LOGW(TAG, "This sensor returned templates of %u and %u bytes", this->template_size_, (unsigned) data.size());
+    this->template_size_ = (uint16_t) data.size();
+  }
   crypto::wipe(data.data(), data.size());
   memcpy(this->hash_[slot].data(), digest, HASH_SIZE);
   this->hash_known_[slot] = true;
@@ -1088,8 +1103,25 @@ void FingerprintGrowPlusComponent::process_manifest_entry_(Session &s, uint16_t 
   }
 }
 
+bool FingerprintGrowPlusComponent::template_compatible_(Session &s, size_t len) {
+  if (this->template_size_ == 0 || len == this->template_size_)
+    return true;
+  this->error_count_++;
+  if (!s.incompatible_logged) {
+    s.incompatible_logged = true;
+    ESP_LOGE(TAG, "Incompatible template from %08" PRIX32 ": %u bytes, this sensor uses %u bytes (different sensor "
+             "model or firmware?); not stored",
+             s.channel.peer_id(), (unsigned) len, this->template_size_);
+    if (s.is_client)
+      this->round_last_error_ = "incompatible sensor";
+  }
+  return false;
+}
+
 void FingerprintGrowPlusComponent::handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash,
                                                 uint32_t expires, const uint8_t *data, size_t len) {
+  if (!this->template_compatible_(s, len))
+    return;
   uint8_t digest[32];
   crypto::sha256(data, len, digest);
   if (memcmp(digest, hash, HASH_SIZE) != 0) {
@@ -1350,6 +1382,10 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
       if (data == nullptr || len == 0 || len > GrowLink::MAX_TEMPLATE_SIZE)
         break;
       bool window = this->restore_open_ && (int32_t) (this->restore_until_ms_ - millis()) > 0;
+      if (window && !this->template_compatible_(s, len)) {
+        this->send_simple_(s, MSG_RESTORE_ACK, slot, 1, true);
+        break;
+      }
       if (!window || slot >= this->capacity_) {
         ESP_LOGW(TAG, "Restore of slot %u refused (restore window closed or slot out of range)", slot);
         this->send_simple_(s, MSG_RESTORE_ACK, slot, 2, true);
@@ -1393,8 +1429,14 @@ void FingerprintGrowPlusComponent::end_session_(Session &s, bool ok, const char 
   } else {
     ESP_LOGW(TAG, "Sync with %s failed: %s", who, reason);
     this->error_count_++;
-    if (s.is_client)
+    if (s.is_client) {
       this->round_last_error_ = std::string(who) + ": " + reason;
+      if (s.peer != nullptr) {
+        if (!this->round_unreachable_.empty())
+          this->round_unreachable_ += ", ";
+        this->round_unreachable_ += std::string(s.peer->host) + " (" + reason + ")";
+      }
+    }
   }
   s.stream->close();
   bool was_client = s.is_client;
@@ -1532,6 +1574,7 @@ void FingerprintGrowPlusComponent::run_round_() {
     this->round_reachable_ = 0;
     this->round_failures_ = 0;
     this->round_last_error_.clear();
+    this->round_unreachable_.clear();
     // remote_present_ is deliberately kept across rounds: clearing it here would let
     // enroll_next_free pick a slot that a peer holds until that peer's manifest arrives.
     // Conflicts are re-evaluated every round; resolved ones disappear on their own.
@@ -1582,6 +1625,16 @@ void FingerprintGrowPlusComponent::run_round_() {
 #ifdef USE_SENSOR
   if (this->peers_reachable_sensor_ != nullptr)
     this->peers_reachable_sensor_->publish_state(this->round_reachable_);
+#endif
+#ifdef USE_TEXT_SENSOR
+  if (this->unreachable_text_sensor_ != nullptr) {
+    // HA text states are limited to 255 characters.
+    std::string text = this->round_unreachable_.empty() ? "-" : this->round_unreachable_.substr(0, 250);
+    if (!this->unreachable_text_sensor_->has_state() || this->unreachable_text_sensor_->state != text) {
+      ESP_LOGD(TAG, "Unreachable peers: %s", text.c_str());
+      this->unreachable_text_sensor_->publish_state(text);
+    }
+  }
 #endif
   this->last_round_ok_ = this->round_failures_ == 0;
   if (this->round_failures_ == 0) {

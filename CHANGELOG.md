@@ -5,6 +5,13 @@ versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Text sensor `unreachable_peers`: the peers that failed in the last sync round, with the reason.
+- Sensor `versions_left`: synced changes left before the version counter must be reset; a log
+  warning below 1000.
+- Templates of a different size than this sensor's (other sensor model or firmware) are refused
+  with a clear log line, both from peers and on restore.
+
 ### Fixed
 - Holding the admin finger with `access:` could open the door: the sensor matched the resting
   finger a second time, which counted as a new single touch. After a hold, matches are ignored

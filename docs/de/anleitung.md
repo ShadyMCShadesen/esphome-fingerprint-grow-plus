@@ -256,5 +256,8 @@ text_sensor:
       name: Belegte Plätze
 ```
 
-Weitere (Sync-Status, Konflikte, erreichbare Geräte, letzter Sync) und alle Optionen, Aktionen
+Für den Sync gibt es außerdem `unreachable_peers` (Text: welche Geräte im letzten Abgleich nicht
+erreicht wurden und warum, `-` wenn alle erreicht wurden) und `versions_left` (wie viele
+synchronisierte Änderungen bis zum nötigen Versions-Reset übrig sind, maximal 16383; unter 1000
+warnt das Log). Weitere (Sync-Status, Konflikte, erreichbare Geräte, letzter Sync) und alle Optionen, Aktionen
 und Trigger: siehe [README](../../README.md#configuration-reference).

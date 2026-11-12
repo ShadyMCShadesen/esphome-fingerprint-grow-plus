@@ -76,7 +76,8 @@ session may also name local-only slots; the `TEMPLATE` answer then carries `meta
 ## Version counter reset
 
 Versions are 14 bit (max 16383). Every enrollment, deletion and conflict resolution in the
-cluster consumes one version. If the limit is ever reached:
+cluster consumes one version. The `versions_left` sensor shows the remaining versions, and the log
+warns below 1000. If the limit is ever reached:
 
 1. Back up one node with `tools/growplus.py backup`.
 2. Erase the metadata on all nodes (flash with `metadata_storage` switched or wipe preferences).

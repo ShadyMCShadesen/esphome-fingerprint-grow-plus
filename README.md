@@ -352,12 +352,14 @@ text_sensor:
   - platform: fingerprint_grow_plus
     occupied_slots: {name: Occupied slots}   # e.g. "0, 2-5, 17, 150-151"
     status: {name: Sync status}
+    unreachable_peers: {name: Unreachable peers}   # "-" or "reader-garage.local (not reachable)"
 sensor:
   - platform: fingerprint_grow_plus
     peers_reachable: {name: Sync peers reachable}
     error_count: {name: Sync errors}
     conflict_count: {name: Sync conflicts}
     last_sync: {name: Last sync}             # needs time_id
+    versions_left: {name: Sync versions left}   # changes left before a version reset (max 16383)
 binary_sensor:
   - platform: fingerprint_grow_plus
     syncing: {name: Syncing}
@@ -387,7 +389,10 @@ binary_sensor:
 - One fingerprint sensor per node; the sensors must be the same model and firmware for sync.
 - Up to 1024 slots with `preferences`, 248 with `sensor_notepad`; at most 64 guest slots.
 - 16,383 changes (enrollments, deletions, claims across all nodes) before the version counter
-  must be reset ([docs/protocol.md](docs/protocol.md)).
+  must be reset ([docs/protocol.md](docs/protocol.md)); the `versions_left` sensor shows how many
+  are left, and the log warns below 1000.
+- Templates must have the same size on all nodes (same sensor model and firmware); a template of
+  a different size is refused with `Incompatible template from …`.
 - `sensor_power_pin` of `fingerprint_grow` is not supported.
 - Observed on R503: 1536-byte templates (the manual says 768) and an unreliable
   template-to-template `Match` command, which is therefore not used.

@@ -103,6 +103,8 @@ struct Session {
   uint16_t served_local{0};
   /// The client asked for the local-only slots during a full-backup window (backup tool).
   bool local_ok{false};
+  /// A template of a different size than this sensor's arrived (logged once per session).
+  bool incompatible_logged{false};
 };
 
 class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
@@ -168,10 +170,12 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void set_error_count_sensor(sensor::Sensor *s) { this->error_count_sensor_ = s; }
   void set_conflict_count_sensor(sensor::Sensor *s) { this->conflict_count_sensor_ = s; }
   void set_last_sync_sensor(sensor::Sensor *s) { this->last_sync_sensor_ = s; }
+  void set_versions_left_sensor(sensor::Sensor *s) { this->versions_left_sensor_ = s; }
 #endif
 #ifdef USE_TEXT_SENSOR
   void set_status_text_sensor(text_sensor::TextSensor *s) { this->status_text_sensor_ = s; }
   void set_occupied_text_sensor(text_sensor::TextSensor *s) { this->occupied_text_sensor_ = s; }
+  void set_unreachable_text_sensor(text_sensor::TextSensor *s) { this->unreachable_text_sensor_ = s; }
 #endif
 #ifdef USE_BINARY_SENSOR
   void set_syncing_binary_sensor(binary_sensor::BinarySensor *s) { this->syncing_binary_sensor_ = s; }
@@ -366,10 +370,13 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   sensor::Sensor *error_count_sensor_{nullptr};
   sensor::Sensor *conflict_count_sensor_{nullptr};
   sensor::Sensor *last_sync_sensor_{nullptr};
+  sensor::Sensor *versions_left_sensor_{nullptr};
+  bool versions_low_warned_{false};
 #endif
 #ifdef USE_TEXT_SENSOR
   text_sensor::TextSensor *status_text_sensor_{nullptr};
   text_sensor::TextSensor *occupied_text_sensor_{nullptr};
+  text_sensor::TextSensor *unreachable_text_sensor_{nullptr};
   uint32_t last_occupied_ms_{0};
   void publish_occupied_();
 #endif
@@ -411,7 +418,12 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint32_t admin_last_ms_{0};        // last admin match (hold detection)
   uint32_t admin_quiet_since_ms_{0};  // last admin match or last moment a finger was on the sensor
   bool admin_hold_possible_{false};
-  bool hold_lock_{false};      // after a hold: ignore admin matches until the finger is gone
+  bool hold_lock_{false};
+  /// Size of this sensor's templates (learned while indexing; 0 = unknown).
+  uint16_t template_size_{0};
+  /// Hosts that could not be reached in the current round (", "-separated).
+  std::string round_unreachable_;
+  bool template_compatible_(Session &s, size_t len);      // after a hold: ignore admin matches until the finger is gone
   uint32_t finger_on_ms_{0};   // last time finger_sensor was on (debounced release)
   AdminArm armed_{AdminArm::NONE};
   uint32_t armed_until_ms_{0};

@@ -113,6 +113,8 @@ sensor:
       name: Peers reachable
     conflict_count:
       name: Sync conflicts
+    versions_left:
+      name: Versions left
 binary_sensor:
   - platform: template
     id: finger_detected
@@ -122,6 +124,8 @@ text_sensor:
       name: Sync status
     occupied_slots:
       name: Occupied slots
+    unreachable_peers:
+      name: Unreachable peers
 fingerprint_grow_plus:
   id: fp_plus
   startup_delay: 2s
@@ -563,6 +567,36 @@ def main():
 
         results.append(wait_until("a peer sending its manifest twice is disconnected",
                                   duplicate_manifest_rejected, 1))
+
+        print("== Scenario 8b: diagnostics - unreachable peers, versions left, incompatible template")
+        results.append(wait_until("A names the peer it could not sync with (node D, wrong key)",
+                                  lambda: "Unreachable peers: 127.0.0.1 (" in c.log("node-a"), 5))
+        results.append(wait_until("A reports the versions left below the maximum",
+                                  lambda: any(l.split("Sync versions left: ")[1].split("\x1b")[0].strip().isdigit()
+                                              and int(l.split("Sync versions left: ")[1].split("\x1b")[0]) < 16383
+                                              for l in c.log("node-a").splitlines() if "Sync versions left: " in l), 5))
+        c.cmd("node-b", "allow_restore")
+        time.sleep(2)
+
+        def incompatible_restore_refused():
+            sock = _socket.create_connection(("127.0.0.1", 18532), timeout=10)
+            ch = growplus.Channel(sock, base64.b64decode(KEY), 0x2345)
+            ch.handshake()
+            ch.send(bytes([growplus.MSG_MANIFEST, 0, 1]) + struct.pack(">HH", 0, 0))
+            growplus.read_manifest(ch)
+            tpl = bytes(768)  # half the size of the simulated sensor's templates
+            ch.send(bytes([growplus.MSG_RESTORE]) + struct.pack(">HIH", 120, 0, len(tpl)) + tpl)
+            while True:
+                msg = ch.recv()
+                if msg[0] == growplus.MSG_RESTORE_ACK:
+                    break
+            sock.close()
+            return msg[3] == 1
+
+        results.append(wait_until("a template of a different size is refused with a clear log line",
+                                  lambda: incompatible_restore_refused()
+                                  and "Incompatible template from" in c.log("node-b")
+                                  and 120 not in c.slots("node-b"), 1))
 
         print("== Scenario 9: admin deletes a finger by presenting it (3 touches + finger)")
         time.sleep(3)

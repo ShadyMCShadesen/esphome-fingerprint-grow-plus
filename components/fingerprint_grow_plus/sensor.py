@@ -17,6 +17,7 @@ CONF_PEERS_REACHABLE = "peers_reachable"
 CONF_ERROR_COUNT = "error_count"
 CONF_CONFLICT_COUNT = "conflict_count"
 CONF_LAST_SYNC = "last_sync"
+CONF_VERSIONS_LEFT = "versions_left"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -42,6 +43,13 @@ CONFIG_SCHEMA = cv.Schema(
             accuracy_decimals=0,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
+        # Synced changes left before the version counter must be reset (max 16383).
+        cv.Optional(CONF_VERSIONS_LEFT): sensor.sensor_schema(
+            icon="mdi:counter",
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
     }
 )
 
@@ -53,6 +61,7 @@ async def to_code(config):
         (CONF_ERROR_COUNT, parent.set_error_count_sensor),
         (CONF_CONFLICT_COUNT, parent.set_conflict_count_sensor),
         (CONF_LAST_SYNC, parent.set_last_sync_sensor),
+        (CONF_VERSIONS_LEFT, parent.set_versions_left_sensor),
     ):
         if key in config:
             cg.add(setter(await sensor.new_sensor(config[key])))

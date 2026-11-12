@@ -89,6 +89,8 @@ have to be enrolled again or restored from a backup). With
 | `CONFLICT in slot X` | different fingers in the same slot | `fingerprint_grow_plus.resolve_conflict` (slot, `keep_local`) |
 | `Verification of slot X failed` | sensor stored something else than sent | check wiring/power; compatibility test A1 |
 | `Template bytes of slot X changed since indexing` | sensor returned different bytes for the same slot (assumption A2 false) | harmless; the stored hash is updated |
+| `Incompatible template from …: X bytes, this sensor uses Y bytes` | the nodes use different sensor models or firmware versions | use the same sensor model/firmware on all synced nodes; the template is not stored |
+| `Only N sync versions left` | the version counter approaches its limit (16383) | plan a version reset (docs/protocol.md); watch the `versions_left` sensor |
 | `Connection lost: 0` (warning from the TCP helper) | peer closed the connection after a finished session | harmless |
 | `Sensor parameters unreliable` | two `ReadSysPara` answers differed or were implausible | retried automatically; power-cycle the sensor if it persists |
 | status `sensor error` | `fingerprint_grow` failed / sensor not answering | check sensor, power, UART |
