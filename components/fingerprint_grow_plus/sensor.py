@@ -18,6 +18,7 @@ CONF_ERROR_COUNT = "error_count"
 CONF_CONFLICT_COUNT = "conflict_count"
 CONF_LAST_SYNC = "last_sync"
 CONF_VERSIONS_LEFT = "versions_left"
+CONF_FAILED_ATTEMPTS = "failed_attempts"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -50,6 +51,12 @@ CONFIG_SCHEMA = cv.Schema(
             state_class=STATE_CLASS_MEASUREMENT,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
+        # Failed attempts counted by lockout: (RAM only).
+        cv.Optional(CONF_FAILED_ATTEMPTS): sensor.sensor_schema(
+            icon="mdi:fingerprint-off",
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
     }
 )
 
@@ -62,6 +69,7 @@ async def to_code(config):
         (CONF_CONFLICT_COUNT, parent.set_conflict_count_sensor),
         (CONF_LAST_SYNC, parent.set_last_sync_sensor),
         (CONF_VERSIONS_LEFT, parent.set_versions_left_sensor),
+        (CONF_FAILED_ATTEMPTS, parent.set_failed_attempts_sensor),
     ):
         if key in config:
             cg.add(setter(await sensor.new_sensor(config[key])))

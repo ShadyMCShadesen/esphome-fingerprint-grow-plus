@@ -10,7 +10,7 @@
 
 namespace esphome::fingerprint_grow_plus {
 
-static constexpr uint8_t PROTOCOL_VERSION = 4;
+static constexpr uint8_t PROTOCOL_VERSION = 5;
 
 enum MsgType : uint8_t {
   /// u8 page | u8 flags(bit0 = last page) | u16 capacity | u16 count | count x Entry
@@ -33,6 +33,8 @@ enum MsgType : uint8_t {
   MSG_LOCAL_LIST_REQ = 0x08,
   /// u8 page | u8 flags(bit0 = last page, bit1 = refused) | u16 count | count x (u16 slot | u32 expires)
   MSG_LOCAL_LIST = 0x09,
+  /// u32 seconds: lock this node for that long (lockout shared by a peer; never forwarded)
+  MSG_LOCK = 0x0A,
 };
 static constexpr size_t LOCAL_LIST_ENTRIES_PER_PAGE = 128;
 

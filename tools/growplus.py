@@ -31,7 +31,7 @@ import sys
 import time
 
 DEFAULT_PORT = 18530
-MAGIC = b"FGP\x04"  # last byte = protocol version
+MAGIC = b"FGP\x05"  # last byte = protocol version
 TAG_SIZE = 16
 MAX_RECORD_BODY = 2560
 (MSG_MANIFEST, MSG_TEMPLATE_REQ, MSG_TEMPLATE, MSG_TEMPLATE_NAK, MSG_DONE, MSG_RESTORE, MSG_RESTORE_ACK,

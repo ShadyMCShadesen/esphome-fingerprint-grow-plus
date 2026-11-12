@@ -181,6 +181,35 @@ Enroll a guest with the 5-touch gesture or `fingerprint_grow_plus.enroll_guest`;
 With sync the expiry date travels with the finger, and the first node that notices the expiry
 deletes it everywhere.
 
+## Lockout and duress finger
+
+```yaml
+fingerprint_grow_plus:
+  lockout:                     # lock after failed attempts
+    max_attempts: 5            # unrecognised fingers in a row (default 5)
+    duration: 15min
+    share_with:                # optional: lock these stations too (as written in sync: peers)
+      - reader-garage.local
+    on_locked: …               # variable source: "local" or "remote"
+    on_unlocked: …
+  duress:                      # duress finger: opens normally, but also fires on_duress
+    slots: "190-199"
+    on_duress:                 # finger_id, confidence: e.g. a silent alarm to Home Assistant
+      - homeassistant.event:
+          event: esphome.duress
+```
+
+- **Lockout**: unrecognised fingers are counted; a recognised finger resets the counter
+  (`reset_on_match: false` to keep it). With `fingerprint_grow_plus.register_failed_attempt` you
+  can count your own failures too, e.g. matches with too low confidence. The lockout only sets
+  the condition `fingerprint_grow_plus.is_locked`: add it to your door action, as with
+  `is_admin_busy`. `fingerprint_grow_plus.reset_lockout` lifts it early on this node.
+- **Shared lockout**: `share_with` passes a local lockout on to the listed stations (they need a
+  `lockout:` block themselves). A lockout received from another station is never passed on.
+- **Duress finger**: the component does not stop the door; the finger works like any other
+  and additionally fires `on_duress`. Condition `fingerprint_grow_plus.is_duress_slot`.
+- Counter and lockout live in RAM only: nothing is written to flash, a reboot clears them.
+
 ## Sync
 
 ```yaml
@@ -312,6 +341,18 @@ fingerprint_grow_plus:
     slots: "150-179"                  # at most 64 slots, outside the admin slots
     valid_for: 7d
 
+  lockout:
+    max_attempts: 5                   # unrecognised fingers in a row
+    duration: 15min
+    reset_on_match: true              # a recognised finger resets the counter
+    share_with: []                    # peers (host or host:port from sync: peers) locked too
+    on_locked: []                     # source: "local" / "remote"
+    on_unlocked: []
+
+  duress:
+    slots: "190-199"                  # or just duress: "190-199"
+    on_duress: []                     # finger_id, confidence
+
   sync:
     key: !secret fingerprint_grow_plus_key   # required: base64 of 32 random bytes
     peers:                            # all nodes (name, name.local, IP, host:port); none = tool only
@@ -352,9 +393,12 @@ fingerprint_grow_plus:
 | `resolve_all_conflicts` | `keep_local` | the same for all current conflicts |
 | `allow_restore` | `duration` (5min) | accept a restore from `tools/growplus.py` |
 | `allow_full_backup` | `duration` (5min) | let `tools/growplus.py backup --include-local` read the slots that are not synced |
+| `register_failed_attempt` | – | count a failed attempt for `lockout:` (unmatched scans count by themselves) |
+| `reset_lockout` | – | lift a lockout and reset the counter on this node |
 
 All actions are called as `fingerprint_grow_plus.<action>`.
-Conditions: `fingerprint_grow_plus.is_ready`, `is_syncing`, `is_admin_busy`, `is_admin_slot`.
+Conditions: `fingerprint_grow_plus.is_ready`, `is_syncing`, `is_admin_busy`, `is_admin_slot`,
+`is_locked`, `is_duress_slot`.
 Lambdas: `id(fp_plus).health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
 
 ### Entities (all optional)
@@ -372,9 +416,11 @@ sensor:
     conflict_count: {name: Sync conflicts}
     last_sync: {name: Last sync}             # needs time_id
     versions_left: {name: Sync versions left}   # changes left before a version reset (max 16383)
+    failed_attempts: {name: Failed attempts}    # lockout: counter
 binary_sensor:
   - platform: fingerprint_grow_plus
     syncing: {name: Syncing}
+    locked: {name: Locked}                     # lockout: active
 ```
 
 ## Good to know

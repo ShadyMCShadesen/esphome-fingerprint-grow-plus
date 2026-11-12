@@ -12,6 +12,10 @@ versioning: [Semantic Versioning](https://semver.org/).
 - `led_feedback:` (optional): built-in ring LED feedback for admin gestures, enrollment, results
   and the status on hold; `on_idle` restores the user's own LED afterwards. Uses only endless
   effects, so `aura_led_control` never blocks the loop.
+- `lockout:` (optional): lock after failed attempts, condition `is_locked`, actions
+  `register_failed_attempt` / `reset_lockout`, entities `failed_attempts` / `locked`;
+  `share_with` passes a lockout on to selected peers (protocol version 5, message `LOCK`).
+- `duress:` (optional): a duress finger range that fires `on_duress`; condition `is_duress_slot`.
 - Templates of a different size than this sensor's (other sensor model or firmware) are refused
   with a clear log line, both from peers and on restore.
 

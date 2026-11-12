@@ -1,4 +1,4 @@
-# Sync protocol (version 4)
+# Sync protocol (version 5)
 
 All integers are big endian. Transport: one TCP connection per session, default port 18530.
 
@@ -9,9 +9,9 @@ Every record: `u16 length | body` (length ≤ 2560).
 ### Handshake (plaintext bodies)
 
 ```
-C → S  C_HELLO  "FGP" 0x04 | 0x01 | client_id u32 | nonce_c[16]                  (25 bytes)
-S → C  S_HELLO  "FGP" 0x04 | 0x02 | server_id u32 | nonce_s[16] | proof_s[32]    (57 bytes)
-C → S  C_AUTH   "FGP" 0x04 | 0x03 | proof_c[32]                                   (37 bytes)
+C → S  C_HELLO  "FGP" 0x05 | 0x01 | client_id u32 | nonce_c[16]                  (25 bytes)
+S → C  S_HELLO  "FGP" 0x05 | 0x02 | server_id u32 | nonce_s[16] | proof_s[32]    (57 bytes)
+C → S  C_AUTH   "FGP" 0x05 | 0x03 | proof_c[32]                                   (37 bytes)
 ```
 
 The fourth magic byte is the protocol version; nodes with different versions refuse each other
@@ -51,13 +51,14 @@ tampered record aborts the session.
 | 0x07 | RESTORE_ACK | `u16 slot, u8 result` (0 ok, 1 failed, 2 refused) |
 | 0x08 | LOCAL_LIST_REQ | no payload; asks for the local-only slots (backup tool only) |
 | 0x09 | LOCAL_LIST | `u8 page, u8 flags (bit0 last page, bit1 refused), u16 count, count × (u16 slot, u32 expires)`; 128 entries per page |
+| 0x0A | LOCK | `u32 seconds`: lock this node for that long (`lockout: share_with`); only sent by the client of a session, never forwarded |
 
 - `meta = state << 14 | version` with state 0 none, 1 present, 2 present-forced, 3 tombstone.
 - `hash` = first 8 bytes of SHA-256(template). Zero for tombstones.
 - `expires` = unix time after which a guest finger is deleted, 0 = never. It belongs to the slot
   version: a node adopting a version adopts its expiry.
 
-Version 4 is the first published version (1-3 were development versions).
+Version history: 4 = 0.2.0 (first published version; 1-3 were development versions); 5 = `LOCK`.
 
 **Full backup.** A node answers `LOCAL_LIST_REQ` only while a full-backup window is open
 (`allow_full_backup`), otherwise with the refused flag. After a granted list, `TEMPLATE_REQ` of this

@@ -116,7 +116,11 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
     this->network_ = true;
   }
   void set_port(uint16_t port) { this->transport_.set_port(port); }
-  void add_peer(const char *host, uint16_t port) { this->peers_.push_back(Peer{host, port}); }
+  void add_peer(const char *host, uint16_t port) {
+    this->peers_.push_back(Peer{host, port});
+    this->lock_targets_.push_back(false);
+    this->lock_pending_.push_back(false);
+  }
   void add_include_range(uint16_t from, uint16_t to) { this->include_.push_back(SlotRange{from, to}); }
   void add_exclude_range(uint16_t from, uint16_t to) { this->exclude_.push_back(SlotRange{from, to}); }
   /// 0 = never (no periodic rounds).
@@ -144,6 +148,23 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   }
   // 0 off, 1 immediate (first touch), 2 delayed (gesture completed with a single touch)
   void set_admin_access(uint8_t mode) { this->admin_access_ = mode; }
+  // ---- lockout: / duress: (lockout.cpp) ----
+  void set_lockout(uint8_t max_attempts, uint32_t duration_ms, bool reset_on_match) {
+    this->lockout_enabled_ = true;
+    this->lockout_max_ = max_attempts;
+    this->lockout_ms_ = duration_ms;
+    this->lockout_reset_on_match_ = reset_on_match;
+  }
+  /// Pass a local lockout on to this peer (host as in sync: peers; port 0 = any port).
+  void add_lock_target(const char *host, uint16_t port);
+  void set_duress(uint16_t from, uint16_t to) {
+    this->duress_enabled_ = true;
+    this->duress_from_ = from;
+    this->duress_to_ = to;
+  }
+  template<typename F> void add_on_locked_callback(F &&cb) { this->locked_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_unlocked_callback(F &&cb) { this->unlocked_cb_.add(std::forward<F>(cb)); }
+  template<typename F> void add_on_duress_callback(F &&cb) { this->duress_cb_.add(std::forward<F>(cb)); }
   /// Built-in Aura LED feedback (led_feedback:). `custom_idle`: on_idle restores the user's LED.
   void set_led_feedback(bool custom_idle) {
     this->led_feedback_ = true;
@@ -177,6 +198,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void set_conflict_count_sensor(sensor::Sensor *s) { this->conflict_count_sensor_ = s; }
   void set_last_sync_sensor(sensor::Sensor *s) { this->last_sync_sensor_ = s; }
   void set_versions_left_sensor(sensor::Sensor *s) { this->versions_left_sensor_ = s; }
+  void set_failed_attempts_sensor(sensor::Sensor *s) { this->failed_attempts_sensor_ = s; }
 #endif
 #ifdef USE_TEXT_SENSOR
   void set_status_text_sensor(text_sensor::TextSensor *s) { this->status_text_sensor_ = s; }
@@ -185,6 +207,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
 #endif
 #ifdef USE_BINARY_SENSOR
   void set_syncing_binary_sensor(binary_sensor::BinarySensor *s) { this->syncing_binary_sensor_ = s; }
+  void set_locked_binary_sensor(binary_sensor::BinarySensor *s) { this->locked_binary_sensor_ = s; }
 #endif
 
   // ---- triggers ----
@@ -252,6 +275,13 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void extend_guest(uint16_t slot, uint32_t valid_s);
   /// Expiry of a slot as unix time, 0 = never.
   uint32_t slot_expiry(uint16_t slot) const { return slot < this->expires_.size() ? this->expires_[slot] : 0; }
+  /// Lockout active (too many failed attempts here, or passed on by a peer).
+  bool is_locked() const;
+  /// Count a failed attempt (e.g. a match with too low confidence); unmatched scans count by themselves.
+  void register_failed_attempt();
+  /// Lift a lockout and reset the counter (this node only).
+  void reset_lockout();
+  bool is_duress_slot(uint16_t slot) const;
   /// 0 = in sync, 1 = sync running, 2 = conflicts, 3 = error (sensor or unreachable peer).
   uint8_t health() const;
   static constexpr uint16_t NO_SLOT = 0xFFFF;
@@ -377,6 +407,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   sensor::Sensor *conflict_count_sensor_{nullptr};
   sensor::Sensor *last_sync_sensor_{nullptr};
   sensor::Sensor *versions_left_sensor_{nullptr};
+  sensor::Sensor *failed_attempts_sensor_{nullptr};
   bool versions_low_warned_{false};
 #endif
 #ifdef USE_TEXT_SENSOR
@@ -388,6 +419,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
 #endif
 #ifdef USE_BINARY_SENSOR
   binary_sensor::BinarySensor *syncing_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *locked_binary_sensor_{nullptr};
 #endif
 
   // ---- runtime ----
@@ -425,6 +457,30 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint32_t admin_quiet_since_ms_{0};  // last admin match or last moment a finger was on the sensor
   bool admin_hold_possible_{false};
   bool hold_lock_{false};
+  // ---- lockout / duress (lockout.cpp) ----
+  void lock_(uint32_t duration_ms, bool remote);
+  void lockout_loop_();
+  void lockout_matched_(uint16_t finger_id, uint16_t confidence);
+  void send_pending_lock_(Session &s);
+  void handle_remote_lock_(Session &s, uint32_t seconds);
+  void retry_pending_locks_();
+  void publish_lockout_();
+  uint32_t lock_remaining_s_() const;
+  bool lockout_enabled_{false};
+  bool lockout_reset_on_match_{true};
+  uint8_t lockout_max_{5};
+  uint32_t lockout_ms_{15 * 60 * 1000};
+  uint8_t failed_attempts_{0};
+  bool locked_{false};
+  uint32_t locked_until_ms_{0};
+  std::vector<bool> lock_targets_;
+  std::vector<bool> lock_pending_;
+  CallbackManager<void(std::string)> locked_cb_;
+  CallbackManager<void()> unlocked_cb_;
+  bool duress_enabled_{false};
+  uint16_t duress_from_{0};
+  uint16_t duress_to_{0};
+  CallbackManager<void(uint16_t, uint16_t)> duress_cb_;
   // ---- built-in LED feedback (led_feedback.cpp) ----
   void setup_led_feedback_();
   void led_set_(uint8_t state, uint8_t color, uint32_t idle_after_ms);

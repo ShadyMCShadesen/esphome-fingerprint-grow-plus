@@ -22,6 +22,7 @@ Fingerprint templates are biometric data. They cannot be changed like a password
 | key leak via repo | key only in `secrets.yaml`; `.gitignore` excludes it |
 | template leak via logs | templates are never logged at any level (only slot numbers); buffers are wiped after use |
 | accidental mass deletion | `delete_all` needs the configured code; admin fingers survive it; local deletions via `fingerprint_grow` are *not* propagated |
+| brute force at the reader | optional `lockout:` (also shared with selected peers); the door action checks `is_locked` |
 | uncontrolled restore | `RESTORE` is accepted only within an `allow_restore` window opened on the node itself |
 | other nodes reading local-only fingers | slots outside the synced range are handed out only to a session that asked during an `allow_full_backup` window opened on the node itself (any key holder could otherwise read them) |
 | resource exhaustion | handshake must finish within 5 s; receive buffer ≤ one record; send buffer ≤ 16 KB per session; one manifest per session, ≤ capacity entries; ≤ 4 outstanding template requests and 1 outstanding restore; job queue ≤ 300 with idempotent jobs deduplicated; at most one template (≈1.5 KB) per session in RAM |

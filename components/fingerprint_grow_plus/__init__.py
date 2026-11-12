@@ -80,6 +80,16 @@ CONF_ON_ADMIN_DONE = "on_done"
 CONF_LED_FEEDBACK = "led_feedback"
 CONF_ON_IDLE = "on_idle"
 
+# lockout: / duress:
+CONF_LOCKOUT = "lockout"
+CONF_MAX_ATTEMPTS = "max_attempts"
+CONF_RESET_ON_MATCH = "reset_on_match"
+CONF_SHARE_WITH = "share_with"
+CONF_ON_LOCKED = "on_locked"
+CONF_ON_UNLOCKED = "on_unlocked"
+CONF_DURESS = "duress"
+CONF_ON_DURESS = "on_duress"
+
 # guests:
 CONF_GUESTS = "guests"
 CONF_VALID_FOR = "valid_for"
@@ -252,6 +262,35 @@ LED_FEEDBACK_SCHEMA = cv.All(
 )
 
 # ---------------------------------------------------------------------------------------
+# lockout: / duress:
+# ---------------------------------------------------------------------------------------
+
+LOCKOUT_SCHEMA = cv.All(
+    _empty_dict_if_none,
+    cv.Schema(
+        {
+            # Unrecognised fingers in a row that lock this node.
+            cv.Optional(CONF_MAX_ATTEMPTS, default=5): cv.int_range(min=1, max=100),
+            cv.Optional(CONF_DURATION, default="15min"): cv.positive_time_period_milliseconds,
+            # A recognised finger resets the counter.
+            cv.Optional(CONF_RESET_ON_MATCH, default=True): cv.boolean,
+            # Lock these peers too: host (or host:port) as written in sync: peers.
+            cv.Optional(CONF_SHARE_WITH, default=[]): cv.ensure_list(validate_peer),
+            cv.Optional(CONF_ON_LOCKED): automation.validate_automation({}),
+            cv.Optional(CONF_ON_UNLOCKED): automation.validate_automation({}),
+        }
+    ),
+)
+
+DURESS_SCHEMA = cv.maybe_simple_value(
+    {
+        cv.Required(CONF_SLOTS): validate_slot_range,
+        cv.Optional(CONF_ON_DURESS): automation.validate_automation({}),
+    },
+    key=CONF_SLOTS,
+)
+
+# ---------------------------------------------------------------------------------------
 # guests:
 # ---------------------------------------------------------------------------------------
 
@@ -293,6 +332,22 @@ def _validate(config):
         admin_slots = config.get(CONF_ADMIN, {}).get(CONF_SLOTS, [])
         if any(low <= a <= high for a in admin_slots):
             raise cv.Invalid("admin slots must not be inside the guest range", path=[CONF_GUESTS])
+    if lockout := config.get(CONF_LOCKOUT):
+        sync = config.get(CONF_SYNC, {})
+        default_port = sync.get(CONF_PORT, DEFAULT_PORT)
+        peers = {(p[CONF_HOST], p.get(CONF_PORT, default_port)) for p in sync.get(CONF_PEERS, [])}
+        for target in lockout[CONF_SHARE_WITH]:
+            host, port = target[CONF_HOST], target.get(CONF_PORT)
+            if not any(h == host and (port is None or p == port) for h, p in peers):
+                raise cv.Invalid(
+                    f"share_with: '{host}' is not in sync: peers (write it as there)",
+                    path=[CONF_LOCKOUT, CONF_SHARE_WITH],
+                )
+    if duress := config.get(CONF_DURESS):
+        low, high = duress[CONF_SLOTS]
+        admin_slots = config.get(CONF_ADMIN, {}).get(CONF_SLOTS, [])
+        if any(low <= a <= high for a in admin_slots):
+            raise cv.Invalid("admin slots must not be inside the duress range", path=[CONF_DURESS])
     if CORE.is_esp8266 and config[CONF_METADATA_STORAGE] == "preferences":
         raise cv.Invalid(
             "ESP8266 has only 512 bytes of flash preferences; use "
@@ -330,6 +385,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ADMIN): ADMIN_SCHEMA,
             cv.Optional(CONF_GUESTS): GUESTS_SCHEMA,
             cv.Optional(CONF_LED_FEEDBACK): LED_FEEDBACK_SCHEMA,
+            cv.Optional(CONF_LOCKOUT): LOCKOUT_SCHEMA,
+            cv.Optional(CONF_DURESS): DURESS_SCHEMA,
             cv.Optional(CONF_SYNC): SYNC_SCHEMA,
             cv.Optional(CONF_ON_SLOT_UPDATED): automation.validate_automation({}),
             cv.Optional(CONF_ON_SLOT_DELETED): automation.validate_automation({}),
@@ -469,6 +526,40 @@ async def to_code(config):
         low, high = guests[CONF_SLOTS]
         cg.add(var.set_guests(low, high, guests[CONF_VALID_FOR]))
 
+    if lockout := config.get(CONF_LOCKOUT):
+        cg.add(
+            var.set_lockout(
+                lockout[CONF_MAX_ATTEMPTS], lockout[CONF_DURATION], lockout[CONF_RESET_ON_MATCH]
+            )
+        )
+        for target in lockout[CONF_SHARE_WITH]:
+            cg.add(var.add_lock_target(target[CONF_HOST], target.get(CONF_PORT, 0)))
+        await automation.build_callback_automations(
+            var,
+            lockout,
+            (
+                automation.CallbackAutomation(
+                    CONF_ON_LOCKED, "add_on_locked_callback", [(cg.std_string, "source")]
+                ),
+                automation.CallbackAutomation(CONF_ON_UNLOCKED, "add_on_unlocked_callback"),
+            ),
+        )
+
+    if duress := config.get(CONF_DURESS):
+        low, high = duress[CONF_SLOTS]
+        cg.add(var.set_duress(low, high))
+        await automation.build_callback_automations(
+            var,
+            duress,
+            (
+                automation.CallbackAutomation(
+                    CONF_ON_DURESS,
+                    "add_on_duress_callback",
+                    [(cg.uint16, "finger_id"), (cg.uint16, "confidence")],
+                ),
+            ),
+        )
+
     if CONF_LED_FEEDBACK in config:
         led = config[CONF_LED_FEEDBACK]
         cg.add(var.set_led_feedback(CONF_ON_IDLE in led))
@@ -569,6 +660,11 @@ _action(
     ),
 )
 
+# --- lockout ---------------------------------------------------------------------------
+
+_simple("register_failed_attempt", "register_failed_attempt()")
+_simple("reset_lockout", "reset_lockout()")
+
 # --- sync ------------------------------------------------------------------------------
 
 _simple("sync", "sync_now()")
@@ -628,6 +724,14 @@ automation.register_apply_condition(
 )
 automation.register_apply_condition(
     "fingerprint_grow_plus.is_admin_busy", _PARENT_SCHEMA, "is_admin_busy()"
+)
+automation.register_apply_condition(
+    "fingerprint_grow_plus.is_locked", _PARENT_SCHEMA, "is_locked()"
+)
+automation.register_apply_condition(
+    "fingerprint_grow_plus.is_duress_slot",
+    cv.maybe_simple_value({_PARENT: _PARENT_ID, cv.Required(CONF_SLOT): _SLOT}, key=CONF_SLOT),
+    automation.ApplyCall("is_duress_slot({})", ((CONF_SLOT, cg.uint16),)),
 )
 automation.register_apply_condition(
     "fingerprint_grow_plus.is_admin_slot",

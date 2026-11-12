@@ -133,6 +133,38 @@ Einlernen mit der Admin-Geste 5× oder `fingerprint_grow_plus.enroll_guest`; ver
 `fingerprint_grow_plus.extend_guest`. Nach Ablauf wird der Finger gelöscht, mit Sync auf allen
 Geräten.
 
+## Sperre nach Fehlversuchen und Notfall-Finger
+
+```yaml
+fingerprint_grow_plus:
+  lockout:                     # Sperre nach Fehlversuchen
+    max_attempts: 5            # nicht erkannte Finger in Folge (Standard 5)
+    duration: 15min
+    share_with:                # optional: diese Stationen ebenfalls sperren (wie in sync: peers)
+      - geraet-2.local
+    on_locked: …               # Variable source: "local" oder "remote"
+    on_unlocked: …
+  duress:                      # Notfall-Finger: öffnet normal, löst zusätzlich on_duress aus
+    slots: "190-199"
+    on_duress:                 # finger_id, confidence: z. B. stiller Alarm an Home Assistant
+      - homeassistant.event:
+          event: esphome.duress
+```
+
+- **Sperre:** Nicht erkannte Finger werden gezählt, ein erkannter Finger setzt den Zähler zurück
+  (`reset_on_match: false`, um das abzuschalten). Mit `fingerprint_grow_plus.register_failed_attempt`
+  zählen auch eigene Fehlversuche, z. B. Treffer mit zu niedrigem Vertrauenswert. Die Sperre setzt
+  nur die Bedingung `fingerprint_grow_plus.is_locked`; die gehört in die eigene Tür-Aktion (wie
+  `is_admin_busy`). `fingerprint_grow_plus.reset_lockout` hebt sie auf diesem Gerät vorzeitig auf.
+- **Geteilte Sperre:** `share_with` gibt eine Sperre an die genannten Stationen weiter (die
+  brauchen selbst einen `lockout:`-Block). Eine von einer anderen Station erhaltene Sperre wird
+  nicht weitergegeben.
+- **Notfall-Finger:** Die Komponente hält die Tür nicht auf; der Finger funktioniert wie jeder
+  andere und löst zusätzlich `on_duress` aus. Bedingung: `fingerprint_grow_plus.is_duress_slot`.
+- Zähler und Sperre liegen nur im RAM: Es wird nichts in den Flash geschrieben, ein Neustart
+  setzt sie zurück.
+- Entitäten: `failed_attempts` (Sensor) und `locked` (Binärsensor).
+
 ## Sync
 
 ### Einrichten

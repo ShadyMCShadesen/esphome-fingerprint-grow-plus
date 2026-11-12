@@ -58,7 +58,11 @@ void FingerprintGrowPlusComponent::setup() {
 
   auto activity = [this]() { this->last_activity_ms_ = millis(); };
   this->grow_->add_on_finger_scan_start_callback(activity);
-  this->grow_->add_on_finger_scan_unmatched_callback(activity);
+  this->grow_->add_on_finger_scan_unmatched_callback([this]() {
+    this->last_activity_ms_ = millis();
+    if (this->lockout_enabled_)
+      this->register_failed_attempt();
+  });
   this->grow_->add_on_finger_scan_misplaced_callback(activity);
   this->grow_->add_on_finger_scan_invalid_callback(activity);
   this->grow_->add_on_finger_scan_matched_callback(
@@ -1367,6 +1371,13 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
     case MSG_DONE:
       s.done_received = true;
       break;
+    case MSG_LOCK: {
+      uint32_t seconds;
+      if (!r.u32(seconds))
+        break;
+      this->handle_remote_lock_(s, seconds);
+      break;
+    }
     case MSG_LOCAL_LIST_REQ:
       if (s.local_ok) {
         this->end_session_(s, false, "local slot list requested twice");
@@ -1509,6 +1520,7 @@ void FingerprintGrowPlusComponent::service_session_(Session &s) {
     s.phase = Session::Phase::SYNC;
     ESP_LOGD(TAG, "Authenticated session with node %08" PRIX32, s.channel.peer_id());
     this->send_manifest_(s);
+    this->send_pending_lock_(s);
   }
 
   if (s.phase == Session::Phase::SYNC) {
@@ -1657,6 +1669,7 @@ void FingerprintGrowPlusComponent::run_round_() {
   }
   this->set_status_(this->dry_run_ ? "idle (dry run)" : (this->round_failures_ ? "idle (last round had errors)" : "idle"));
   this->publish_diagnostics_();
+  this->retry_pending_locks_();
   if (!this->round_requested_)
     this->request_periodic_round_();
 }
@@ -1701,6 +1714,7 @@ void FingerprintGrowPlusComponent::loop() {
   this->run_round_();
 
   this->admin_loop_();
+  this->lockout_loop_();
   this->guest_expiry_loop_();
 #ifdef USE_TEXT_SENSOR
   if (this->occupied_text_sensor_ != nullptr && this->indexed_once_ && elapsed(now, this->last_occupied_ms_, 2000)) {

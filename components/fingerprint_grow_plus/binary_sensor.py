@@ -1,4 +1,4 @@
-"""Optional "syncing" binary sensor of fingerprint_grow_plus."""
+"""Optional binary sensors of fingerprint_grow_plus."""
 
 import esphome.codegen as cg
 from esphome.components import binary_sensor
@@ -10,6 +10,7 @@ from . import CONF_FINGERPRINT_GROW_PLUS_ID, FingerprintGrowPlusComponent
 DEPENDENCIES = ["fingerprint_grow_plus"]
 
 CONF_SYNCING = "syncing"
+CONF_LOCKED = "locked"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -18,15 +19,20 @@ CONFIG_SCHEMA = cv.Schema(
             device_class=DEVICE_CLASS_RUNNING,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
+        # On while a lockout is active (lockout:). No device class: HA's "lock" class means
+        # on = unlocked, which would read the wrong way round here.
+        cv.Optional(CONF_LOCKED): binary_sensor.binary_sensor_schema(
+            icon="mdi:lock-alert",
+        ),
     }
 )
 
 
 async def to_code(config):
     parent = await cg.get_variable(config[CONF_FINGERPRINT_GROW_PLUS_ID])
-    if CONF_SYNCING in config:
-        cg.add(
-            parent.set_syncing_binary_sensor(
-                await binary_sensor.new_binary_sensor(config[CONF_SYNCING])
-            )
-        )
+    for key, setter in (
+        (CONF_SYNCING, parent.set_syncing_binary_sensor),
+        (CONF_LOCKED, parent.set_locked_binary_sensor),
+    ):
+        if key in config:
+            cg.add(setter(await binary_sensor.new_binary_sensor(config[key])))

@@ -27,11 +27,35 @@ SIM = ROOT / "tests" / "sim" / "r503_sim.py"
 KEY = "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="
 WRONG_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
+LOCKOUT = (
+    "\n  lockout:"
+    "\n    max_attempts: 3"
+    "\n    duration: 40s"
+    "\n    share_with: [{share}]"
+    "\n    on_locked:"
+    "\n      - logger.log:"
+    "\n          format: 'TEST-EVENT locked %s'"
+    "\n          args: [source.c_str()]"
+    "\n    on_unlocked:"
+    "\n      - logger.log: 'TEST-EVENT unlocked'"
+)
+DURESS = (
+    "\n  duress:"
+    "\n    slots: '150-159'"
+    "\n    on_duress:"
+    "\n      - logger.log:"
+    "\n          format: 'TEST-EVENT duress %u'"
+    "\n          args: [finger_id]"
+)
+
 NODES = {
     "node-a": {"port": 18531, "peers": ["node-b", "node-c", "node-d"], "include": ["0-199"], "exclude": []},
-    "node-b": {"port": 18532, "peers": ["node-a", "node-c"], "include": ["0-199"], "exclude": []},
+    # node-b locks after 3 unrecognised fingers and passes the lockout on to node-c only
+    "node-b": {"port": 18532, "peers": ["node-a", "node-c"], "include": ["0-199"], "exclude": [],
+               "top_extra": LOCKOUT.format(share="127.0.0.1:18533")},
     # node-c keeps 150-199 for itself (node-exclusive range)
-    "node-c": {"port": 18533, "peers": ["node-a", "node-b"], "include": ["0-199"], "exclude": ["150-199"]},
+    "node-c": {"port": 18533, "peers": ["node-a", "node-b"], "include": ["0-199"], "exclude": ["150-199"],
+               "top_extra": LOCKOUT.format(share="") + DURESS},
     # node-d has the wrong key and must be rejected
     "node-d": {"port": 18534, "peers": ["node-a"], "include": ["0-199"], "exclude": [], "key": WRONG_KEY},
     # node-e runs in dry-run mode: it must log what it would do and change nothing
@@ -230,7 +254,7 @@ class Cluster:
                 pty=self.path(name, "pty"),
                 cmd=self.path(name, "cmd"),
                 admin_extra="\n    access: delayed" if cfg.get("standalone") else "",
-                top_extra="\n  led_feedback:" if cfg.get("standalone") else "",
+                top_extra=("\n  led_feedback:" if cfg.get("standalone") else "") + cfg.get("top_extra", ""),
                 sync_block=sync_block,
             )
             yaml_path = self.path(name, "yaml")
@@ -764,6 +788,22 @@ def main():
         c.cmd("node-h", "sync")
         results.append(wait_until("the next manual sync brings hugo to A",
                                   lambda: "hugo" in c.slots("node-a").values(), 60))
+
+        print("== Scenario 13: lockout shared with selected peers, duress finger")
+        for i in range(3):
+            c.touch("node-b", f"stranger{i}")
+            time.sleep(2.5)
+        results.append(wait_until("B locks itself after 3 unrecognised fingers",
+                                  lambda: "TEST-EVENT locked local" in c.log("node-b"), 15))
+        results.append(wait_until("the lockout reaches C (share_with) ...",
+                                  lambda: "TEST-EVENT locked remote" in c.log("node-c"), 30))
+        results.append(wait_until("... but not A (not in share_with)",
+                                  lambda: "Locked for" not in c.log("node-a") and "requested a lockout" not in c.log("node-a"), 1))
+        results.append(wait_until("both unlock again after the duration",
+                                  lambda: "TEST-EVENT unlocked" in c.log("node-b") and "TEST-EVENT unlocked" in c.log("node-c"), 60))
+        c.touch("node-c", "eve")  # slot 150 on C is in the duress range
+        results.append(wait_until("the duress finger fires on_duress",
+                                  lambda: "TEST-EVENT duress 150" in c.log("node-c"), 15))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))
