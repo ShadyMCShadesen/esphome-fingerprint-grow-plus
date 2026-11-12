@@ -347,23 +347,53 @@ int32_t FingerprintGrowPlusComponent::next_free_in_(uint16_t from, uint16_t to, 
 }
 
 // ---------------------------------------------------------------------------------------------
-// Expiry persistence (preferences backend only; the notepad has no room for it)
+// Persistence of the slot extras: guest expiry, guest uses, names (preferences backend only; the
+// notepad has no room for them). ESPHome compares with the stored value before writing, so only
+// changed blocks wear the flash; names are only written once one was set or changed.
 // ---------------------------------------------------------------------------------------------
+
+static constexpr size_t USES_PREF_CHUNK = 64;
+static constexpr size_t NAMES_PREF_CHUNK = 16;
+using NameBlock = std::array<uint8_t, NAMES_PREF_CHUNK * (1 + MAX_NAME_LEN)>;
 
 void FingerprintGrowPlusComponent::load_expiries_() {
   this->expires_.assign(this->capacity_, 0);
+  this->uses_.assign(this->capacity_, 0);
+  this->names_.clear();
   if (this->backend_ != MetaBackend::PREFERENCES)
     return;
-  const size_t chunks = (this->capacity_ + EXPIRY_PREF_CHUNK - 1) / EXPIRY_PREF_CHUNK;
-  const uint32_t base = fnv1_hash("fingerprint_grow_plus_expiry") ^ this->node_id_;
-  for (size_t c = 0; c < chunks; c++) {
+  const uint32_t exp_base = fnv1_hash("fingerprint_grow_plus_expiry") ^ this->node_id_;
+  for (size_t c = 0; c * EXPIRY_PREF_CHUNK < this->capacity_; c++) {
     this->expiry_prefs_.push_back(
-        global_preferences->make_preference<std::array<uint32_t, EXPIRY_PREF_CHUNK>>(base + c, true));
+        global_preferences->make_preference<std::array<uint32_t, EXPIRY_PREF_CHUNK>>(exp_base + c, true));
     std::array<uint32_t, EXPIRY_PREF_CHUNK> chunk{};
     if (!this->expiry_prefs_[c].load(&chunk))
       continue;
     for (size_t i = 0; i < EXPIRY_PREF_CHUNK && c * EXPIRY_PREF_CHUNK + i < this->capacity_; i++)
       this->expires_[c * EXPIRY_PREF_CHUNK + i] = chunk[i];
+  }
+  const uint32_t uses_base = fnv1_hash("fingerprint_grow_plus_uses") ^ this->node_id_;
+  for (size_t c = 0; c * USES_PREF_CHUNK < this->capacity_; c++) {
+    this->uses_prefs_.push_back(
+        global_preferences->make_preference<std::array<uint8_t, USES_PREF_CHUNK>>(uses_base + c, true));
+    std::array<uint8_t, USES_PREF_CHUNK> chunk{};
+    if (!this->uses_prefs_[c].load(&chunk))
+      continue;
+    for (size_t i = 0; i < USES_PREF_CHUNK && c * USES_PREF_CHUNK + i < this->capacity_; i++)
+      this->uses_[c * USES_PREF_CHUNK + i] = chunk[i];
+  }
+  const uint32_t names_base = fnv1_hash("fingerprint_grow_plus_names") ^ this->node_id_;
+  for (size_t c = 0; c * NAMES_PREF_CHUNK < this->capacity_; c++) {
+    this->names_prefs_.push_back(global_preferences->make_preference<NameBlock>(names_base + c, true));
+    NameBlock block{};
+    if (!this->names_prefs_[c].load(&block))
+      continue;
+    for (size_t i = 0; i < NAMES_PREF_CHUNK && c * NAMES_PREF_CHUNK + i < this->capacity_; i++) {
+      const uint8_t *entry = block.data() + i * (1 + MAX_NAME_LEN);
+      const uint8_t len = std::min<uint8_t>(entry[0], MAX_NAME_LEN);
+      if (len > 0)
+        this->names_[c * NAMES_PREF_CHUNK + i] = std::string((const char *) entry + 1, len);
+    }
   }
 }
 
@@ -373,6 +403,27 @@ void FingerprintGrowPlusComponent::save_expiries_() {
     for (size_t i = 0; i < EXPIRY_PREF_CHUNK && c * EXPIRY_PREF_CHUNK + i < this->capacity_; i++)
       chunk[i] = this->expires_[c * EXPIRY_PREF_CHUNK + i];
     this->expiry_prefs_[c].save(&chunk);
+  }
+  for (size_t c = 0; c < this->uses_prefs_.size(); c++) {
+    std::array<uint8_t, USES_PREF_CHUNK> chunk{};
+    for (size_t i = 0; i < USES_PREF_CHUNK && c * USES_PREF_CHUNK + i < this->capacity_; i++)
+      chunk[i] = this->uses_[c * USES_PREF_CHUNK + i];
+    this->uses_prefs_[c].save(&chunk);
+  }
+  if (!this->names_dirty_)
+    return;
+  this->names_dirty_ = false;
+  for (size_t c = 0; c < this->names_prefs_.size(); c++) {
+    NameBlock block{};
+    for (size_t i = 0; i < NAMES_PREF_CHUNK; i++) {
+      auto it = this->names_.find(c * NAMES_PREF_CHUNK + i);
+      if (it == this->names_.end())
+        continue;
+      uint8_t *entry = block.data() + i * (1 + MAX_NAME_LEN);
+      entry[0] = (uint8_t) std::min(it->second.size(), MAX_NAME_LEN);
+      memcpy(entry + 1, it->second.data(), entry[0]);
+    }
+    this->names_prefs_[c].save(&block);
   }
 }
 

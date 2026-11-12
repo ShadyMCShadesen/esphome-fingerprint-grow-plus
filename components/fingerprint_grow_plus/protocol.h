@@ -10,37 +10,40 @@
 
 namespace esphome::fingerprint_grow_plus {
 
-static constexpr uint8_t PROTOCOL_VERSION = 5;
+static constexpr uint8_t PROTOCOL_VERSION = 6;
 
 enum MsgType : uint8_t {
-  /// u8 page | u8 flags(bit0 = last page) | u16 capacity | u16 count | count x Entry
-  /// Entry = u16 slot | u16 meta | u8 hash[8] | u32 expires (unix time, 0 = never)
+  /// u8 page | u8 flags(bit0 = last page) | u16 capacity | u16 epoch | u16 count | count x Entry
+  /// Entry = u16 slot | u16 meta | u8 hash[8] | Extra
+  /// Extra = u32 expires (unix time, 0 = never) | u8 uses_left (0 = unlimited) | u8 name_len | name
   MSG_MANIFEST = 0x01,
   /// u16 slot
   MSG_TEMPLATE_REQ = 0x02,
-  /// u16 slot | u16 meta | u8 hash[8] | u32 expires | u16 len | data[len]
+  /// u16 slot | u16 meta | u8 hash[8] | Extra | u16 len | data[len]
   MSG_TEMPLATE = 0x03,
   /// u16 slot | u8 reason
   MSG_TEMPLATE_NAK = 0x04,
   /// no payload: "I need nothing more from you"
   MSG_DONE = 0x05,
-  /// u16 slot | u32 expires | u16 len | data[len]  (only accepted while a restore window is open)
+  /// u16 slot | Extra | u16 len | data[len]  (only accepted while a restore window is open)
   MSG_RESTORE = 0x06,
   /// u16 slot | u8 result (0 = ok)
   MSG_RESTORE_ACK = 0x07,
   /// no payload: list the local-only slots (outside the synced range) for a full backup.
   /// Only answered while a full-backup window is open; peers never send it.
   MSG_LOCAL_LIST_REQ = 0x08,
-  /// u8 page | u8 flags(bit0 = last page, bit1 = refused) | u16 count | count x (u16 slot | u32 expires)
+  /// u8 page | u8 flags(bit0 = last page, bit1 = refused) | u16 count | count x (u16 slot | Extra)
   MSG_LOCAL_LIST = 0x09,
   /// u32 seconds: lock this node for that long (lockout shared by a peer; never forwarded)
   MSG_LOCK = 0x0A,
 };
-static constexpr size_t LOCAL_LIST_ENTRIES_PER_PAGE = 128;
+static constexpr size_t LOCAL_LIST_ENTRIES_PER_PAGE = 48;
 
 static constexpr size_t HASH_SIZE = 8;
-static constexpr size_t MANIFEST_ENTRY_SIZE = 2 + 2 + HASH_SIZE + 4;
-static constexpr size_t MANIFEST_ENTRIES_PER_PAGE = 64;
+/// Longest slot name in bytes (UTF-8).
+static constexpr size_t MAX_NAME_LEN = 24;
+/// Worst case: 48 entries x (2 + 2 + 8 + 4 + 1 + 1 + 24) bytes stays below the record limit.
+static constexpr size_t MANIFEST_ENTRIES_PER_PAGE = 48;
 
 /// Packed per-slot metadata: bits 15..14 = state, bits 13..0 = version (Lamport clock).
 enum SlotState : uint8_t {

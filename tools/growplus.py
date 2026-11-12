@@ -31,7 +31,7 @@ import sys
 import time
 
 DEFAULT_PORT = 18530
-MAGIC = b"FGP\x05"  # last byte = protocol version
+MAGIC = b"FGP\x06"  # last byte = protocol version
 TAG_SIZE = 16
 MAX_RECORD_BODY = 2560
 (MSG_MANIFEST, MSG_TEMPLATE_REQ, MSG_TEMPLATE, MSG_TEMPLATE_NAK, MSG_DONE, MSG_RESTORE, MSG_RESTORE_ACK,
@@ -183,8 +183,23 @@ def connect(args, key: bytes) -> Channel:
     ch = Channel(sock, key, tool_id)
     ch.handshake()
     # Offer an empty manifest: the node will not pull anything from this tool.
-    ch.send(bytes([MSG_MANIFEST, 0, 1]) + struct.pack(">HH", 0, 0))
+    ch.send(bytes([MSG_MANIFEST, 0, 1]) + struct.pack(">HHH", 0, 0, 0))  # capacity, epoch, count
     return ch
+
+
+MAX_NAME_LEN = 24
+
+
+def parse_extra(msg: bytes, pos: int):
+    """Extra = u32 expires | u8 uses (0 = unlimited) | u8 name_len | name. Returns (dict, new pos)."""
+    expires, uses, name_len = struct.unpack(">IBB", msg[pos : pos + 6])
+    name = msg[pos + 6 : pos + 6 + name_len].decode("utf-8", "replace")
+    return {"expires": expires, "uses": uses, "name": name}, pos + 6 + name_len
+
+
+def pack_extra(entry: dict) -> bytes:
+    name = entry.get("name", "").encode("utf-8")[:MAX_NAME_LEN]
+    return struct.pack(">IBB", entry.get("expires", 0), entry.get("uses", 0), len(name)) + name
 
 
 def read_manifest(ch: Channel):
@@ -193,13 +208,13 @@ def read_manifest(ch: Channel):
         msg = ch.recv()
         if msg[0] == MSG_MANIFEST:
             _, flags = msg[1], msg[2]
-            count = struct.unpack(">H", msg[5:7])[0]
-            pos = 7
+            count = struct.unpack(">H", msg[7:9])[0]  # after capacity and epoch
+            pos = 9
             for _ in range(count):
                 slot, meta = struct.unpack(">HH", msg[pos : pos + 4])
-                expires = struct.unpack(">I", msg[pos + 12 : pos + 16])[0]
-                entries[slot] = (meta, msg[pos + 4 : pos + 12], expires)
-                pos += 16
+                digest = msg[pos + 4 : pos + 12]
+                extra, pos = parse_extra(msg, pos + 12)
+                entries[slot] = (meta, digest, extra)
             if flags & 1:
                 return entries
         elif msg[0] == MSG_DONE:
@@ -222,15 +237,14 @@ def read_local_list(ch: Channel):
         count = struct.unpack(">H", msg[3:5])[0]
         pos = 5
         for _ in range(count):
-            slot, expires = struct.unpack(">HI", msg[pos : pos + 6])
-            entries[slot] = expires
-            pos += 6
+            slot = struct.unpack(">H", msg[pos : pos + 2])[0]
+            entries[slot], pos = parse_extra(msg, pos + 2)
         if flags & 1:
             return entries
 
 
 def fetch_template(ch: Channel, slot: int):
-    """Returns (meta, expires, data) or None if the node could not read the slot."""
+    """Returns (meta, extra, data) or None if the node could not read the slot."""
     ch.send(bytes([MSG_TEMPLATE_REQ]) + struct.pack(">H", slot))
     while True:
         msg = ch.recv()
@@ -240,12 +254,12 @@ def fetch_template(ch: Channel, slot: int):
         return None
     r_slot, r_meta = struct.unpack(">HH", msg[1:5])
     r_hash = msg[5:13]
-    r_expires = struct.unpack(">I", msg[13:17])[0]
-    length = struct.unpack(">H", msg[17:19])[0]
-    data = msg[19 : 19 + length]
+    extra, pos = parse_extra(msg, 13)
+    length = struct.unpack(">H", msg[pos : pos + 2])[0]
+    data = msg[pos + 2 : pos + 2 + length]
     if r_slot != slot or hashlib.sha256(data).digest()[:8] != r_hash:
         sys.exit(f"slot {slot}: checksum mismatch, backup aborted")
-    return r_meta, r_expires, data
+    return r_meta, extra, data
 
 
 def finish(ch: Channel):
@@ -313,10 +327,18 @@ def cmd_status(args):
     ch = connect(args, key)
     entries = read_manifest(ch)
     finish(ch)
-    print(f"Node {ch.peer_id:08X} at {args.host}: {len(entries)} managed slot entries")
-    for slot, (meta, _h, expires) in sorted(entries.items()):
-        until = f"  guest until {time.ctime(expires)}" if expires else ""
-        print(f"  slot {slot:4d}  {STATE_NAMES[meta >> 14]:<17} version {meta & 0x3FFF}{until}")
+    print(f"Node {ch.peer_id:08X} at {args.host}: {len(entries)} synced slot entries")
+    for slot, (meta, _h, extra) in sorted(entries.items()):
+        print(f"  slot {slot:4d}  {STATE_NAMES[meta >> 14]:<17} version {meta & 0x3FFF}{describe(extra)}")
+
+
+def describe(extra: dict) -> str:
+    text = f"  {extra['name']}" if extra.get("name") else ""
+    if extra.get("expires"):
+        text += f"  guest until {time.ctime(extra['expires'])}"
+    if extra.get("uses"):
+        text += f"  {extra['uses']} use(s) left"
+    return text
 
 
 def cmd_backup(args):
@@ -342,10 +364,11 @@ def cmd_backup(args):
         if result is None:
             print(f"  slot {slot}: node could not read it", file=sys.stderr)
             continue
-        meta, expires, data = result
-        slots[str(slot)] = {"meta": meta, "expires": expires, "local": is_local,
+        meta, extra, data = result
+        slots[str(slot)] = {"meta": meta, "expires": extra["expires"], "uses": extra["uses"],
+                            "name": extra["name"], "local": is_local,
                             "template": base64.b64encode(data).decode()}
-        print(f"  slot {slot}: {len(data)} bytes{' (local only)' if is_local else ''}")
+        print(f"  slot {slot}: {len(data)} bytes{' (local only)' if is_local else ''}{describe(extra)}")
     finish(ch)
     write_backup(args.out, key, {"node": f"{ch.peer_id:08X}", "host": args.host, "created": int(time.time()),
                                  "slots": slots})
@@ -359,7 +382,7 @@ def cmd_inspect(args):
     for slot, entry in sorted(data["slots"].items(), key=lambda kv: int(kv[0])):
         size = len(base64.b64decode(entry["template"]))
         kind = "local only" if entry.get("local") else f"version {entry['meta'] & 0x3FFF}"
-        print(f"  slot {int(slot):4d}  {kind:12s}  {size} bytes")
+        print(f"  slot {int(slot):4d}  {kind:12s}  {size} bytes{describe(entry)}")
 
 
 def cmd_restore(args):
@@ -374,7 +397,8 @@ def cmd_restore(args):
         if wanted and slot not in wanted:
             continue
         tpl = base64.b64decode(entry["template"])
-        ch.send(bytes([MSG_RESTORE]) + struct.pack(">HIH", slot, entry.get("expires", 0), len(tpl)) + tpl)
+        ch.send(bytes([MSG_RESTORE]) + struct.pack(">H", slot) + pack_extra(entry) + struct.pack(">H", len(tpl))
+                + tpl)
         while True:
             msg = ch.recv()
             if msg[0] == MSG_RESTORE_ACK:

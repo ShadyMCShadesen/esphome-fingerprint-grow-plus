@@ -1,4 +1,4 @@
-# Sync protocol (version 5)
+# Sync protocol (version 6)
 
 All integers are big endian. Transport: one TCP connection per session, default port 18530.
 
@@ -9,9 +9,9 @@ Every record: `u16 length | body` (length ≤ 2560).
 ### Handshake (plaintext bodies)
 
 ```
-C → S  C_HELLO  "FGP" 0x05 | 0x01 | client_id u32 | nonce_c[16]                  (25 bytes)
-S → C  S_HELLO  "FGP" 0x05 | 0x02 | server_id u32 | nonce_s[16] | proof_s[32]    (57 bytes)
-C → S  C_AUTH   "FGP" 0x05 | 0x03 | proof_c[32]                                   (37 bytes)
+C → S  C_HELLO  "FGP" 0x06 | 0x01 | client_id u32 | nonce_c[16]                  (25 bytes)
+S → C  S_HELLO  "FGP" 0x06 | 0x02 | server_id u32 | nonce_s[16] | proof_s[32]    (57 bytes)
+C → S  C_AUTH   "FGP" 0x06 | 0x03 | proof_c[32]                                   (37 bytes)
 ```
 
 The fourth magic byte is the protocol version; nodes with different versions refuse each other
@@ -42,15 +42,15 @@ tampered record aborts the session.
 
 | type | name | payload |
 |---|---|---|
-| 0x01 | MANIFEST | `u8 page, u8 flags (bit0 = last), u16 capacity, u16 count, count × (u16 slot, u16 meta, u8 hash[8], u32 expires)` |
+| 0x01 | MANIFEST | `u8 page, u8 flags (bit0 = last), u16 capacity, u16 epoch, u16 count, count × (u16 slot, u16 meta, u8 hash[8], Extra)`; 48 entries per page |
 | 0x02 | TEMPLATE_REQ | `u16 slot` |
-| 0x03 | TEMPLATE | `u16 slot, u16 meta, u8 hash[8], u32 expires, u16 len, u8 data[len]` |
+| 0x03 | TEMPLATE | `u16 slot, u16 meta, u8 hash[8], Extra, u16 len, u8 data[len]` |
 | 0x04 | TEMPLATE_NAK | `u16 slot, u8 reason` |
 | 0x05 | DONE | – |
-| 0x06 | RESTORE | `u16 slot, u32 expires, u16 len, u8 data[len]` (accepted only in a restore window) |
+| 0x06 | RESTORE | `u16 slot, Extra, u16 len, u8 data[len]` (accepted only in a restore window) |
 | 0x07 | RESTORE_ACK | `u16 slot, u8 result` (0 ok, 1 failed, 2 refused) |
 | 0x08 | LOCAL_LIST_REQ | no payload; asks for the local-only slots (backup tool only) |
-| 0x09 | LOCAL_LIST | `u8 page, u8 flags (bit0 last page, bit1 refused), u16 count, count × (u16 slot, u32 expires)`; 128 entries per page |
+| 0x09 | LOCAL_LIST | `u8 page, u8 flags (bit0 last page, bit1 refused), u16 count, count × (u16 slot, Extra)`; 48 entries per page |
 | 0x0A | LOCK | `u32 seconds`: lock this node for that long (`lockout: share_with`); only sent by the client of a session, never forwarded |
 
 - `meta = state << 14 | version` with state 0 none, 1 present, 2 present-forced, 3 tombstone.
@@ -58,7 +58,12 @@ tampered record aborts the session.
 - `expires` = unix time after which a guest finger is deleted, 0 = never. It belongs to the slot
   version: a node adopting a version adopts its expiry.
 
-Version history: 4 = 0.2.0 (first published version; 1-3 were development versions); 5 = `LOCK`.
+`Extra` = `u32 expires (unix time, 0 = never), u8 uses_left (0 = unlimited), u8 name_len, name[name_len]`
+(UTF-8, at most 24 bytes). Tombstones carry an empty Extra. Name, expiry and uses belong to the
+slot version: a node adopting a version adopts them.
+
+Version history: 4 = 0.2.0 (first published version; 1-3 were development versions); 5 = `LOCK`;
+6 = `Extra` (names, guest uses) and the manifest epoch.
 
 **Full backup.** A node answers `LOCAL_LIST_REQ` only while a full-backup window is open
 (`allow_full_backup`), otherwise with the refused flag. After a granted list, `TEMPLATE_REQ` of this
@@ -66,7 +71,7 @@ session may also name local-only slots; the `TEMPLATE` answer then carries `meta
 
 ### Session flow
 
-1. After the handshake both sides send their manifest (64 entries per page, at least one page).
+1. After the handshake both sides send their manifest (48 entries per page, at least one page).
 2. Each side processes the peer's manifest and requests templates it needs, **one at a time**.
    The next request is sent after the previous template has been stored, which bounds the memory
    to one template.

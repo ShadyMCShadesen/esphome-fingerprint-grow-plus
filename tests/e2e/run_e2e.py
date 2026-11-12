@@ -610,7 +610,7 @@ def main():
             sock = _socket.create_connection(("127.0.0.1", 18532), timeout=10)
             ch = growplus.Channel(sock, __import__("base64").b64decode(KEY), 0x1234)
             ch.handshake()
-            empty = bytes([growplus.MSG_MANIFEST, 0, 1, 0, 200, 0, 0])
+            empty = bytes([growplus.MSG_MANIFEST, 0, 1, 0, 200, 0, 0, 0, 0])  # capacity, epoch, count
             ch.send(empty)
             ch.send(empty)
             try:
@@ -638,10 +638,11 @@ def main():
             sock = _socket.create_connection(("127.0.0.1", 18532), timeout=10)
             ch = growplus.Channel(sock, base64.b64decode(KEY), 0x2345)
             ch.handshake()
-            ch.send(bytes([growplus.MSG_MANIFEST, 0, 1]) + struct.pack(">HH", 0, 0))
+            ch.send(bytes([growplus.MSG_MANIFEST, 0, 1]) + struct.pack(">HHH", 0, 0, 0))
             growplus.read_manifest(ch)
             tpl = bytes(768)  # half the size of the simulated sensor's templates
-            ch.send(bytes([growplus.MSG_RESTORE]) + struct.pack(">HIH", 120, 0, len(tpl)) + tpl)
+            ch.send(bytes([growplus.MSG_RESTORE]) + struct.pack(">H", 120) + growplus.pack_extra({})
+                    + struct.pack(">H", len(tpl)) + tpl)
             while True:
                 msg = ch.recv()
                 if msg[0] == growplus.MSG_RESTORE_ACK:
@@ -790,7 +791,7 @@ def main():
             sock = _socket.create_connection(("127.0.0.1", int(g_port)), timeout=10)
             ch = growplus.Channel(sock, base64.b64decode(KEY), 0x1235)
             ch.handshake()
-            ch.send(bytes([growplus.MSG_MANIFEST, 0, 1]) + struct.pack(">HH", 0, 0))
+            ch.send(bytes([growplus.MSG_MANIFEST, 0, 1]) + struct.pack(">HHH", 0, 0, 0))
             growplus.read_manifest(ch)
             ch.send(bytes([growplus.MSG_TEMPLATE_REQ]) + struct.pack(">H", 1))
             while True:

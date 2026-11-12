@@ -623,7 +623,7 @@ void FingerprintGrowPlusComponent::job_serve_(Job &job) {
   w.u16(slot);
   w.u16(synced ? this->meta_[slot] : 0);
   w.bytes(digest, HASH_SIZE);
-  w.u32(this->expires_[slot]);
+  this->write_extra_(w, slot);
   w.u16((uint16_t) data.size());
   w.bytes(data.data(), data.size());
   crypto::wipe(data.data(), data.size());
@@ -661,9 +661,72 @@ bool FingerprintGrowPlusComponent::store_verified_(uint8_t buffer, uint16_t slot
   return ok;
 }
 
-void FingerprintGrowPlusComponent::apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires) {
+SlotExtra FingerprintGrowPlusComponent::extra_of_(uint16_t slot) const {
+  SlotExtra e;
+  if (slot < this->expires_.size())
+    e.expires = this->expires_[slot];
+  if (slot < this->uses_.size())
+    e.uses = this->uses_[slot];
+  auto it = this->names_.find(slot);
+  if (it != this->names_.end())
+    e.name = it->second;
+  return e;
+}
+
+void FingerprintGrowPlusComponent::set_extra_(uint16_t slot, const SlotExtra &extra) {
+  this->set_expiry_(slot, extra.expires);
+  this->set_uses_(slot, extra.uses);
+  this->set_name_(slot, extra.name);
+}
+
+void FingerprintGrowPlusComponent::set_uses_(uint16_t slot, uint8_t uses) {
+  if (slot < this->uses_.size() && this->uses_[slot] != uses) {
+    this->uses_[slot] = uses;
+    this->mark_dirty_();
+  }
+}
+
+void FingerprintGrowPlusComponent::set_name_(uint16_t slot, const std::string &name) {
+  auto it = this->names_.find(slot);
+  if (name.empty()) {
+    if (it == this->names_.end())
+      return;
+    this->names_.erase(it);
+  } else {
+    if (it != this->names_.end() && it->second == name)
+      return;
+    this->names_[slot] = name.substr(0, MAX_NAME_LEN);
+  }
+  this->names_dirty_ = true;
+  this->mark_dirty_();
+}
+
+void FingerprintGrowPlusComponent::write_extra_(MsgWriter &w, uint16_t slot) const {
+  SlotExtra e = this->extra_of_(slot);
+  w.u32(e.expires);
+  w.u8(e.uses);
+  const size_t len = std::min(e.name.size(), MAX_NAME_LEN);
+  w.u8((uint8_t) len);
+  w.bytes((const uint8_t *) e.name.data(), len);
+}
+
+bool FingerprintGrowPlusComponent::read_extra_(MsgReader &r, SlotExtra &extra) {
+  uint8_t len;
+  if (!r.u32(extra.expires) || !r.u8(extra.uses) || !r.u8(len))
+    return false;
+  if (len > MAX_NAME_LEN)
+    return false;
+  const uint8_t *name = r.ptr(len);
+  if (name == nullptr)
+    return false;
+  extra.name.assign((const char *) name, len);
+  return true;
+}
+
+void FingerprintGrowPlusComponent::apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash,
+                                                 const SlotExtra &extra) {
   this->meta_[slot] = meta;
-  this->set_expiry_(slot, expires);
+  this->set_extra_(slot, extra);
   memcpy(this->hash_[slot].data(), hash, HASH_SIZE);
   this->hash_known_[slot] = true;
   this->local_present_[slot] = true;
@@ -698,7 +761,7 @@ void FingerprintGrowPlusComponent::job_write_(Job &job) {
   if (restore && ok && !this->managed_(slot)) {
     // Local-only slot: no version, nothing to propagate.
     this->local_present_[slot] = true;
-    this->set_expiry_(slot, job.expires);
+    this->set_extra_(slot, job.extra);
     if (!this->count_queued_) {
       this->count_queued_ = true;
       this->queue_simple_job_(JobType::COUNT);
@@ -714,7 +777,7 @@ void FingerprintGrowPlusComponent::job_write_(Job &job) {
     meta = meta_pack(SLOT_PRESENT_FORCED, this->next_version_());
   }
   if (ok) {
-    this->apply_stored_(slot, meta, job.hash.data(), job.expires);
+    this->apply_stored_(slot, meta, job.hash.data(), job.extra);
     ESP_LOGI(TAG, "Slot %u %s (version %u)", slot,
              restore ? "restored" : ((job.flags & JOB_FLAG_REPLACE) ? "replaced from peer" : "received from peer"),
              meta_version(meta));
@@ -766,7 +829,7 @@ void FingerprintGrowPlusComponent::job_delete_(Job &job) {
   }
   if (slot < this->capacity_) {
     this->local_present_[slot] = false;
-    this->set_expiry_(slot, 0);
+    this->set_extra_(slot, SlotExtra{});  // expiry, uses and name go with the finger
     if (this->managed_(slot)) {
       uint16_t meta = job.meta;
       if (job.flags & JOB_FLAG_LOCAL)
@@ -989,7 +1052,7 @@ void FingerprintGrowPlusComponent::send_local_list_(Session &s) {
     w.u16((uint16_t) count);
     for (size_t i = 0; i < count; i++) {
       w.u16(slots[first + i]);
-      w.u32(this->expires_[slots[first + i]]);
+      this->write_extra_(w, slots[first + i]);
     }
     this->send_message_(s, msg);
   }
@@ -1070,7 +1133,7 @@ FingerprintGrowPlusComponent::Decision FingerprintGrowPlusComponent::decide_(uin
 }
 
 void FingerprintGrowPlusComponent::process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta,
-                                                       const uint8_t *hash, uint32_t expires) {
+                                                       const uint8_t *hash, const SlotExtra &extra) {
   if (slot >= this->capacity_ || !this->managed_(slot))
     return;
   this->remote_present_[slot] = this->remote_present_[slot] || meta_present(meta);
@@ -1083,7 +1146,7 @@ void FingerprintGrowPlusComponent::process_manifest_entry_(Session &s, uint16_t 
       break;
     case Decision::ADOPT:
       this->meta_[slot] = d.meta;
-      this->set_expiry_(slot, meta_present(d.meta) ? expires : 0);
+      this->set_extra_(slot, meta_present(d.meta) ? extra : SlotExtra{});
       this->mark_dirty_();
       break;
     case Decision::DELETE: {
@@ -1099,11 +1162,17 @@ void FingerprintGrowPlusComponent::process_manifest_entry_(Session &s, uint16_t 
       this->flag_conflict_(slot);
       break;
     case Decision::NOTHING:
-      // Same template and version: a node that lost the guest expiry (e.g. no persistence) takes
-      // it over from the peer, so every node can enforce it.
-      if (expires != 0 && meta_present(meta) && meta == this->meta_[slot] && this->expires_[slot] == 0 &&
-          this->hash_known_[slot] && memcmp(this->hash_[slot].data(), hash, HASH_SIZE) == 0)
-        this->set_expiry_(slot, expires);
+      // Same template and version: a node that lost data that is not persisted everywhere (guest
+      // expiry or uses, name; e.g. ESP8266 notepad storage) takes it over from the peer.
+      if (meta_present(meta) && meta == this->meta_[slot] && this->hash_known_[slot] &&
+          memcmp(this->hash_[slot].data(), hash, HASH_SIZE) == 0) {
+        if (extra.expires != 0 && this->expires_[slot] == 0)
+          this->set_expiry_(slot, extra.expires);
+        if (extra.uses != 0 && this->uses_[slot] == 0)
+          this->set_uses_(slot, extra.uses);
+        if (!extra.name.empty() && this->names_.find(slot) == this->names_.end())
+          this->set_name_(slot, extra.name);
+      }
       break;
   }
 }
@@ -1124,7 +1193,7 @@ bool FingerprintGrowPlusComponent::template_compatible_(Session &s, size_t len) 
 }
 
 void FingerprintGrowPlusComponent::handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash,
-                                                uint32_t expires, const uint8_t *data, size_t len) {
+                                                const SlotExtra &extra, const uint8_t *data, size_t len) {
   if (!this->template_compatible_(s, len))
     return;
   uint8_t digest[32];
@@ -1139,7 +1208,7 @@ void FingerprintGrowPlusComponent::handle_template_(Session &s, uint16_t slot, u
   if (d.kind != Decision::PULL) {
     if (d.kind == Decision::ADOPT) {
       this->meta_[slot] = d.meta;
-      this->set_expiry_(slot, expires);
+      this->set_extra_(slot, extra);
       this->mark_dirty_();
     }
     return;
@@ -1147,7 +1216,7 @@ void FingerprintGrowPlusComponent::handle_template_(Session &s, uint16_t slot, u
   Job job;
   job.slot = slot;
   job.meta = meta;
-  job.expires = expires;
+  job.extra = extra;
   job.session = s.gen;
   memcpy(job.hash.data(), hash, HASH_SIZE);
   job.data.assign(data, data + len);
@@ -1275,6 +1344,7 @@ void FingerprintGrowPlusComponent::send_manifest_(Session &s) {
     w.u8((uint8_t) page);
     w.u8(page + 1 == pages ? 1 : 0);
     w.u16(this->capacity_);
+    w.u16(this->epoch_);
     w.u16((uint16_t) count);
     for (size_t i = 0; i < count; i++) {
       uint16_t slot = slots[first + i];
@@ -1282,7 +1352,13 @@ void FingerprintGrowPlusComponent::send_manifest_(Session &s) {
       w.u16(this->meta_[slot]);
       static const uint8_t ZERO[HASH_SIZE] = {0};
       w.bytes(meta_present(this->meta_[slot]) ? this->hash_[slot].data() : ZERO, HASH_SIZE);
-      w.u32(this->expires_[slot]);
+      if (meta_present(this->meta_[slot])) {
+        this->write_extra_(w, slot);
+      } else {
+        w.u32(0);  // tombstone: no extra data
+        w.u8(0);
+        w.u8(0);
+      }
     }
     this->send_message_(s, msg);
   }
@@ -1297,9 +1373,10 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
   switch (msg[0]) {
     case MSG_MANIFEST: {
       uint8_t page, flags;
-      uint16_t capacity, count;
-      if (!r.u8(page) || !r.u8(flags) || !r.u16(capacity) || !r.u16(count))
+      uint16_t capacity, epoch, count;
+      if (!r.u8(page) || !r.u8(flags) || !r.u16(capacity) || !r.u16(epoch) || !r.u16(count))
         break;
+      s.peer_epoch = epoch;
       if (s.manifest_received) {
         this->end_session_(s, false, "manifest sent twice");
         return;
@@ -1312,10 +1389,10 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
       for (uint16_t i = 0; i < count; i++) {
         uint16_t slot, meta;
         uint8_t hash[HASH_SIZE];
-        uint32_t expires;
-        if (!r.u16(slot) || !r.u16(meta) || !r.bytes(hash, HASH_SIZE) || !r.u32(expires))
+        SlotExtra extra;
+        if (!r.u16(slot) || !r.u16(meta) || !r.bytes(hash, HASH_SIZE) || !read_extra_(r, extra))
           break;
-        this->process_manifest_entry_(s, slot, meta, hash, expires);
+        this->process_manifest_entry_(s, slot, meta, hash, extra);
       }
       if (r.ok() && (flags & 1)) {
         s.manifest_received = true;
@@ -1343,8 +1420,8 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
     case MSG_TEMPLATE: {
       uint16_t slot, meta, len;
       uint8_t hash[HASH_SIZE];
-      uint32_t expires;
-      if (!r.u16(slot) || !r.u16(meta) || !r.bytes(hash, HASH_SIZE) || !r.u32(expires) || !r.u16(len))
+      SlotExtra extra;
+      if (!r.u16(slot) || !r.u16(meta) || !r.bytes(hash, HASH_SIZE) || !read_extra_(r, extra) || !r.u16(len))
         break;
       const uint8_t *data = r.ptr(len);
       if (data == nullptr || len == 0 || len > GrowLink::MAX_TEMPLATE_SIZE)
@@ -1355,7 +1432,7 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
       }
       s.awaiting_template = false;
       if (slot < this->capacity_ && this->managed_(slot))
-        this->handle_template_(s, slot, meta, hash, expires, data, len);
+        this->handle_template_(s, slot, meta, hash, extra, data, len);
       break;
     }
     case MSG_TEMPLATE_NAK: {
@@ -1387,8 +1464,8 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
       break;
     case MSG_RESTORE: {
       uint16_t slot, len;
-      uint32_t expires;
-      if (!r.u16(slot) || !r.u32(expires) || !r.u16(len))
+      SlotExtra extra;
+      if (!r.u16(slot) || !read_extra_(r, extra) || !r.u16(len))
         break;
       const uint8_t *data = r.ptr(len);
       if (data == nullptr || len == 0 || len > GrowLink::MAX_TEMPLATE_SIZE)
@@ -1412,7 +1489,7 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
       job.slot = slot;
       job.flags = JOB_FLAG_RESTORE;
       job.session = s.gen;
-      job.expires = expires;
+      job.extra = extra;
       uint8_t digest[32];
       crypto::sha256(data, len, digest);
       memcpy(job.hash.data(), digest, HASH_SIZE);

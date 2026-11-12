@@ -29,6 +29,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <map>
 #include <vector>
 
 namespace esphome::fingerprint_grow_plus {
@@ -76,6 +77,13 @@ enum JobFlag : uint8_t {
   JOB_FLAG_PROPAGATE = 1 << 5,  // start a sync round once the job is done
 };
 
+/// Data that travels with a slot version besides the template (see protocol.h, Extra).
+struct SlotExtra {
+  uint32_t expires{0};  // guest expiry (unix time), 0 = never
+  uint8_t uses{0};      // guest uses left, 0 = unlimited
+  std::string name;     // optional slot name, up to MAX_NAME_LEN bytes
+};
+
 struct Job {
   JobType type;
   uint16_t slot{0};
@@ -83,7 +91,7 @@ struct Job {
   uint8_t flags{0};
   uint32_t session{0};
   std::array<uint8_t, HASH_SIZE> hash{};
-  uint32_t expires{0};
+  SlotExtra extra;
   std::vector<uint8_t> data;
 };
 
@@ -115,6 +123,8 @@ struct Session {
   uint16_t served_local{0};
   /// The client asked for the local-only slots during a full-backup window (backup tool).
   bool local_ok{false};
+  /// Epoch announced in the peer's manifest (version resets, see docs/protocol.md).
+  uint16_t peer_epoch{0};
   /// A template of a different size than this sensor's arrived (logged once per session).
   bool incompatible_logged{false};
 };
@@ -346,12 +356,19 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void job_count_();
   void job_save_meta_();
   bool store_verified_(uint8_t buffer, uint16_t slot, const std::vector<uint8_t> &data);
-  void apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires);
+  void apply_stored_(uint16_t slot, uint16_t meta, const uint8_t *hash, const SlotExtra &extra);
+  SlotExtra extra_of_(uint16_t slot) const;
+  void set_extra_(uint16_t slot, const SlotExtra &extra);
+  void write_extra_(MsgWriter &w, uint16_t slot) const;
+  static bool read_extra_(MsgReader &r, SlotExtra &extra);
+  void set_uses_(uint16_t slot, uint8_t uses);
+  void set_name_(uint16_t slot, const std::string &name);
 
   // sync logic
   Decision decide_(uint16_t slot, uint16_t remote_meta, const uint8_t *remote_hash) const;
-  void process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires);
-  void handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, uint32_t expires,
+  void process_manifest_entry_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash,
+                               const SlotExtra &extra);
+  void handle_template_(Session &s, uint16_t slot, uint16_t meta, const uint8_t *hash, const SlotExtra &extra,
                         const uint8_t *data, size_t len);
   void flag_conflict_(uint16_t slot);
   void set_expiry_(uint16_t slot, uint32_t expires);
@@ -528,7 +545,13 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint32_t last_expiry_check_ms_{0};
   bool last_round_ok_{true};
   std::vector<uint32_t> expires_;
+  std::vector<uint8_t> uses_;                  // guest uses left per slot, 0 = unlimited
+  std::map<uint16_t, std::string> names_;      // only slots that have a name use memory
+  uint16_t epoch_{0};                          // version-reset generation (docs/protocol.md)
   std::vector<ESPPreferenceObject> expiry_prefs_;
+  std::vector<ESPPreferenceObject> uses_prefs_;
+  std::vector<ESPPreferenceObject> names_prefs_;
+  bool names_dirty_{false};
   uint32_t restore_until_ms_{0};
   bool restore_open_{false};
   uint32_t full_backup_until_ms_{0};
