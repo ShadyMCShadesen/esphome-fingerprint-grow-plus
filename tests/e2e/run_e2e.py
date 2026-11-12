@@ -133,7 +133,7 @@ fingerprint_grow_plus:
   fingerprint_capacity_sensor: fp_capacity
   delete_all_code: TEST_ALL
   time_id: host_time
-  finger_sensor: finger_detected
+  finger_sensor: finger_detected{top_extra}
   on_enroll_started:
     - logger.log:
         format: "TEST-EVENT enroll_started %u"
@@ -230,6 +230,7 @@ class Cluster:
                 pty=self.path(name, "pty"),
                 cmd=self.path(name, "cmd"),
                 admin_extra="\n    access: delayed" if cfg.get("standalone") else "",
+                top_extra="\n  led_feedback:" if cfg.get("standalone") else "",
                 sync_block=sync_block,
             )
             yaml_path = self.path(name, "yaml")
@@ -623,6 +624,21 @@ def main():
         c.touches("node-f", "zoe", 2, gap=1.5)
         results.append(wait_until("zoe enrolled in slot 1 on the stand-alone node",
                                   lambda: c.slots("node-f").get(1) == "zoe", 30))
+        def led_seq(name, *expected):
+            """True if the LED commands (state, colour) appear in this order in the simulator log."""
+            got = [line.strip() for line in c.path(name, "sim.log").read_text(encoding="utf-8").splitlines()
+                   if line.startswith("LED ")]
+            pos = 0
+            for item in got:
+                if pos < len(expected) and item == expected[pos]:
+                    pos += 1
+            return pos == len(expected)
+
+        # touch 1 cyan, touch 2 purple (preview), gesture -> off, enrolling flashes purple,
+        # done flashes green, then off again
+        results.append(wait_until("led_feedback: preview, enrolling, success and idle colours",
+                                  lambda: led_seq("node-f", "LED 3 6", "LED 3 3", "LED 4 2", "LED 2 3",
+                                                  "LED 2 4", "LED 4 2"), 10))
         results.append(wait_until("two admin touches open the menu without access",
                                   lambda: c.log("node-f").count("TEST-EVENT admin_access") == 1, 1))
         results.append(wait_until("the stand-alone finger stays local",
@@ -639,6 +655,8 @@ def main():
         time.sleep(2)
         c.cmd("node-f", "finger_off")
         time.sleep(5)
+        results.append(wait_until("led_feedback: hold shows the status colour (green = all fine)",
+                                  lambda: led_seq("node-f", "LED 3 6", "LED 3 4"), 1))
         results.append(wait_until("a hold (with a second match) triggers no access",
                                   lambda: c.log("node-f").count("TEST-EVENT admin_access") == access_before
                                   and "matched again during a hold: ignored" in c.log("node-f"), 1))

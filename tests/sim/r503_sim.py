@@ -231,6 +231,8 @@ class Sim:
             self.notepad[args[0]] = bytes(args[1:33])
             self.ack(0x00)
         elif cmd in (0x35, 0x50, 0x51):  # LED control
+            if cmd == 0x35 and len(args) >= 3:
+                print(f"LED {args[0]} {args[2]}", flush=True)  # state, colour
             self.ack(0x00)
         elif cmd == 0x12:  # SetPwd must never be used
             print("SIM ERROR: SetPwd received", file=sys.stderr, flush=True)

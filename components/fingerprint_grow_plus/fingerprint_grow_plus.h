@@ -144,6 +144,12 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   }
   // 0 off, 1 immediate (first touch), 2 delayed (gesture completed with a single touch)
   void set_admin_access(uint8_t mode) { this->admin_access_ = mode; }
+  /// Built-in Aura LED feedback (led_feedback:). `custom_idle`: on_idle restores the user's LED.
+  void set_led_feedback(bool custom_idle) {
+    this->led_feedback_ = true;
+    this->led_custom_idle_ = custom_idle;
+  }
+  template<typename F> void add_on_led_idle_callback(F &&cb) { this->led_idle_cb_.add(std::forward<F>(cb)); }
   void set_guests(uint16_t from, uint16_t to, uint32_t valid_s) {
     this->guests_enabled_ = true;
     this->guest_from_ = from;
@@ -419,6 +425,15 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint32_t admin_quiet_since_ms_{0};  // last admin match or last moment a finger was on the sensor
   bool admin_hold_possible_{false};
   bool hold_lock_{false};
+  // ---- built-in LED feedback (led_feedback.cpp) ----
+  void setup_led_feedback_();
+  void led_set_(uint8_t state, uint8_t color, uint32_t idle_after_ms);
+  void led_idle_();
+  bool led_feedback_{false};
+  bool led_custom_idle_{false};
+  bool led_reenroll_pending_{false};
+  uint8_t led_enroll_color_{0};  // != 0 while an enrollment started by this component runs
+  CallbackManager<void()> led_idle_cb_;
   /// Size of this sensor's templates (learned while indexing; 0 = unknown).
   uint16_t template_size_{0};
   /// Hosts that could not be reached in the current round (", "-separated).

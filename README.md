@@ -145,18 +145,28 @@ fingerprint_grow_plus:
 - `immediate`: fires at once on the first touch. A second touch opens the menu, but the door has
   already opened.
 
-**LED feedback** comes from triggers; the component never drives the LEDs itself. Status colour
-on hold:
+**LED feedback** (optional): with `led_feedback:` the component drives the sensor's ring LED itself.
 
 ```yaml
 fingerprint_grow_plus:
-  admin:
-    on_hold:
-      # health(): 0 green = all fine, 1 blue = sync running, 2 yellow = conflict, 3 red = error
-      - lambda: |-
-          static const uint8_t colors[] = {4, 2, 5, 1};
-          id(grow).aura_led_control(2, 50, colors[id(fp_plus).health()], 5);
+  led_feedback:
+    on_idle:                 # optional: restore your own LED afterwards (otherwise: LED off)
+      - script.execute: my_idle_led
 ```
+
+| Moment | LED |
+|---|---|
+| admin finger touched 1× / 2× / 3× / 4× / 5× (preview of the action) | steady cyan / purple / red / yellow / white |
+| waiting for the finger to delete / to enroll again | flashing red / yellow |
+| enrolling (new finger / again / guest) | flashing purple / yellow / white |
+| enrolled, deleted | green flashes 1.5 s |
+| failed, cancelled | red flashes 1.5 s |
+| admin finger held: status (`health()`) | steady 3 s: green = all fine, blue = sync running, yellow = conflict, red = error |
+
+Only enrollments started by this component are shown (`fingerprint_grow.enroll` keeps your own
+feedback). Without `led_feedback:` the component never touches the LED; build your own feedback
+with the triggers `on_touch`, `on_gesture`, `on_waiting`, `on_cancelled`, `on_done`, `on_hold` and
+`on_enroll_started` instead.
 
 ## Guest fingers
 
@@ -276,6 +286,8 @@ fingerprint_grow_plus:
   on_enroll_started: []               # slot
   on_slot_updated: []                 # slot: a finger was written by the sync / restore
   on_slot_deleted: []                 # slot
+  led_feedback:                       # optional built-in ring LED feedback (table above)
+    on_idle: []                       # restore your own LED; without it the LED is switched off
 
   admin:
     slots: [0]                        # protected admin slots (1-10)

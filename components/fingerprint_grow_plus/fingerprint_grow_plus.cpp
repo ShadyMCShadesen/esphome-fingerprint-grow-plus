@@ -95,6 +95,7 @@ void FingerprintGrowPlusComponent::setup() {
 
   this->set_status_("starting");
   this->publish_diagnostics_();
+  this->setup_led_feedback_();
 }
 
 void FingerprintGrowPlusComponent::dump_config() {

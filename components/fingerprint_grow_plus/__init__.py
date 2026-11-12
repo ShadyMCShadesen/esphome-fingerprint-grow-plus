@@ -76,6 +76,10 @@ CONF_ON_ADMIN_WAITING = "on_waiting"
 CONF_ON_ADMIN_CANCELLED = "on_cancelled"
 CONF_ON_ADMIN_DONE = "on_done"
 
+# led_feedback:
+CONF_LED_FEEDBACK = "led_feedback"
+CONF_ON_IDLE = "on_idle"
+
 # guests:
 CONF_GUESTS = "guests"
 CONF_VALID_FOR = "valid_for"
@@ -234,6 +238,20 @@ ADMIN_SCHEMA = cv.All(
 )
 
 # ---------------------------------------------------------------------------------------
+# led_feedback:
+# ---------------------------------------------------------------------------------------
+
+LED_FEEDBACK_SCHEMA = cv.All(
+    _empty_dict_if_none,
+    cv.Schema(
+        {
+            # Called when a feedback ends; without it the LED is switched off.
+            cv.Optional(CONF_ON_IDLE): automation.validate_automation({}),
+        }
+    ),
+)
+
+# ---------------------------------------------------------------------------------------
 # guests:
 # ---------------------------------------------------------------------------------------
 
@@ -311,6 +329,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_METADATA_STORAGE): cv.enum(METADATA_STORAGE, lower=True),
             cv.Optional(CONF_ADMIN): ADMIN_SCHEMA,
             cv.Optional(CONF_GUESTS): GUESTS_SCHEMA,
+            cv.Optional(CONF_LED_FEEDBACK): LED_FEEDBACK_SCHEMA,
             cv.Optional(CONF_SYNC): SYNC_SCHEMA,
             cv.Optional(CONF_ON_SLOT_UPDATED): automation.validate_automation({}),
             cv.Optional(CONF_ON_SLOT_DELETED): automation.validate_automation({}),
@@ -449,6 +468,13 @@ async def to_code(config):
     if guests := config.get(CONF_GUESTS):
         low, high = guests[CONF_SLOTS]
         cg.add(var.set_guests(low, high, guests[CONF_VALID_FOR]))
+
+    if CONF_LED_FEEDBACK in config:
+        led = config[CONF_LED_FEEDBACK]
+        cg.add(var.set_led_feedback(CONF_ON_IDLE in led))
+        await automation.build_callback_automations(
+            var, led, (automation.CallbackAutomation(CONF_ON_IDLE, "add_on_led_idle_callback"),)
+        )
 
 
 # ---------------------------------------------------------------------------------------

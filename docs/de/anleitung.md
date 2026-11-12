@@ -96,9 +96,30 @@ fingerprint_grow_plus:
 - `immediate`: öffnet sofort beim ersten Auflegen. Ein zweites Auflegen öffnet dann das Menü,
   die Tür ist aber schon offen.
 
-**LED-Rückmeldung** kommt aus den Triggern `on_touch`, `on_gesture`, `on_waiting`, `on_cancelled`,
-`on_done`, `on_hold` (im `admin:`-Block) und `on_enroll_started`. Die Komponente steuert die LEDs
-nie selbst.
+**LED-Rückmeldung** (optional): Mit `led_feedback:` steuert die Komponente den LED-Ring des
+Sensors selbst:
+
+| Moment | LED |
+|---|---|
+| Admin-Finger 1× / 2× / 3× / 4× / 5× (Vorschau der Aktion) | dauerhaft cyan / lila / rot / gelb / weiß |
+| Warten auf den Finger zum Löschen / Neu-Einlernen | blinkt rot / gelb |
+| Einlernen (neuer Finger / erneut / Gast) | blinkt lila / gelb / weiß |
+| eingelernt, gelöscht | blinkt 1,5 s grün |
+| fehlgeschlagen, abgebrochen | blinkt 1,5 s rot |
+| Admin-Finger gehalten: Status | 3 s dauerhaft: grün = alles ok, blau = Sync läuft, gelb = Konflikt, rot = Fehler |
+
+Danach geht die LED aus, oder `on_idle` stellt die eigene LED wieder her:
+
+```yaml
+fingerprint_grow_plus:
+  led_feedback:
+    on_idle:
+      - script.execute: meine_ruhe_led
+```
+
+Ohne `led_feedback:` fasst die Komponente die LED nie an; eigene Rückmeldungen baut man dann mit
+den Triggern `on_touch`, `on_gesture`, `on_waiting`, `on_cancelled`, `on_done`, `on_hold`
+(im `admin:`-Block) und `on_enroll_started`.
 
 ## Gästefinger
 
