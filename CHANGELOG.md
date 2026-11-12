@@ -15,6 +15,10 @@ versioning: [Semantic Versioning](https://semver.org/).
 - `lockout:` (optional): lock after failed attempts, condition `is_locked`, actions
   `register_failed_attempt` / `reset_lockout`, entities `failed_attempts` / `locked`;
   `share_with` passes a lockout on to selected peers (protocol version 5, message `LOCK`).
+- Slot names: action `set_name`, `name:` for `enroll_next_free` / `enroll_guest`, lambda
+  `slot_name()`, text sensor `last_name`; synced with the slot and kept in backups.
+- Protocol version 6: every slot version carries its extras (expiry, guest uses, name); the
+  manifest announces an epoch for version resets.
 - `schedule:` (optional): time windows for slot ranges (days, from/to, over midnight), condition
   `is_allowed`, trigger `on_denied`; `without_time: deny | allow` while the time is unknown.
 - `duress:` (optional): a duress finger range that fires `on_duress`; condition `is_duress_slot`.

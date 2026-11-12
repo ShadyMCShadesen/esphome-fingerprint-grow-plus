@@ -181,6 +181,25 @@ Enroll a guest with the 5-touch gesture or `fingerprint_grow_plus.enroll_guest`;
 With sync the expiry date travels with the finger, and the first node that notices the expiry
 deletes it everywhere.
 
+## Names
+
+Slots can carry a name (up to 24 bytes, UTF-8). With sync it travels with the finger to all nodes.
+
+```yaml
+# set a name
+- fingerprint_grow_plus.set_name: {slot: 12, name: "Anna index finger"}
+# enroll with a name
+- fingerprint_grow_plus.enroll_next_free: {num_scans: 3, name: "Ben"}
+# use it, e.g. in on_finger_scan_matched
+- logger.log:
+    format: "Welcome %s"
+    args: ['id(fp_plus).slot_name(finger_id).c_str()']
+```
+
+The text sensor `last_name` shows the name of the last recognised finger (`#<slot>` without a
+name), and backups keep the names. Names cost RAM and flash only for slots that have one; they
+are written to flash only when a name changes. Renaming a synced slot uses one sync version.
+
 ## Lockout and duress finger
 
 ```yaml
@@ -415,14 +434,15 @@ fingerprint_grow_plus:
 
 | Action | Parameters | Effect |
 |---|---|---|
-| `enroll_next_free` | `num_scans` (3) | enroll the lowest free slot (with sync: free on all nodes) |
+| `enroll_next_free` | `num_scans` (3), `name` | enroll the lowest free slot (with sync: free on all nodes) |
+| `set_name` | `slot`, `name` | name a slot (empty name removes it); synced slots on all nodes |
 | `delete` | `slot` | delete a finger (with sync: on all nodes); admin slots refused |
 | `delete_all` | `code` | delete all fingers except the admin fingers (with sync: on all nodes) |
 | `delete_next_finger` | – | the next finger shown is deleted |
 | `reenroll_next_finger` | – | the next finger shown is enrolled again into its slot |
 | `cancel_admin` | – | cancel a pending admin action |
 | `delete_admin` | `slot`, `code` | delete an admin finger |
-| `enroll_guest` | `num_scans` (3), `valid_for` (7d) | enroll the next free guest slot |
+| `enroll_guest` | `num_scans` (3), `valid_for` (7d), `name` | enroll the next free guest slot |
 | `extend_guest` | `slot`, `valid_for` (7d) | new validity for a guest |
 | `sync` | – | start a sync round now |
 | `claim_all_slots` | – | this node's fingers replace the same slots on all nodes |
@@ -436,7 +456,7 @@ fingerprint_grow_plus:
 All actions are called as `fingerprint_grow_plus.<action>`.
 Conditions: `fingerprint_grow_plus.is_ready`, `is_syncing`, `is_admin_busy`, `is_admin_slot`,
 `is_locked`, `is_duress_slot`, `is_allowed`.
-Lambdas: `id(fp_plus).health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
+Lambdas: `id(fp_plus).slot_name(slot)`, `health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
 
 ### Entities (all optional)
 
@@ -445,7 +465,8 @@ text_sensor:
   - platform: fingerprint_grow_plus
     occupied_slots: {name: Occupied slots}   # e.g. "0, 2-5, 17, 150-151"
     status: {name: Sync status}
-    unreachable_peers: {name: Unreachable peers}   # "-" or "reader-garage.local (not reachable)"
+    unreachable_peers: {name: Unreachable peers}
+    last_name: {name: Last recognised}       # name of the last recognised finger   # "-" or "reader-garage.local (not reachable)"
 sensor:
   - platform: fingerprint_grow_plus
     peers_reachable: {name: Sync peers reachable}

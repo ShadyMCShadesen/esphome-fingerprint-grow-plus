@@ -231,6 +231,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void set_status_text_sensor(text_sensor::TextSensor *s) { this->status_text_sensor_ = s; }
   void set_occupied_text_sensor(text_sensor::TextSensor *s) { this->occupied_text_sensor_ = s; }
   void set_unreachable_text_sensor(text_sensor::TextSensor *s) { this->unreachable_text_sensor_ = s; }
+  void set_last_name_text_sensor(text_sensor::TextSensor *s) { this->last_name_text_sensor_ = s; }
 #endif
 #ifdef USE_BINARY_SENSOR
   void set_syncing_binary_sensor(binary_sensor::BinarySensor *s) { this->syncing_binary_sensor_ = s; }
@@ -269,7 +270,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   /// Delete all fingers except admins here; synced slots also on all peers. Requires the code.
   void delete_all(const std::string &code);
   /// Enroll the lowest slot that is free on this node and on all peers seen since boot.
-  void enroll_next_free(uint8_t num_scans);
+  void enroll_next_free(uint8_t num_scans, const std::string &name = "");
   /// Resolve a conflict: keep this node's finger (pushed to all peers) or take the peer's.
   void resolve_conflict(uint16_t slot, bool keep_local);
   /// Accept MSG_RESTORE from the backup tool for `seconds`.
@@ -297,9 +298,16 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   /// Delete an admin slot on all nodes (admin slots are protected otherwise).
   void delete_admin(uint16_t slot, const std::string &code);
   /// Enroll the next free guest slot; it is deleted on all nodes after `valid_s` seconds.
-  void enroll_guest(uint8_t num_scans, uint32_t valid_s);
+  void enroll_guest(uint8_t num_scans, uint32_t valid_s, const std::string &name = "");
   /// Set a new validity for an existing guest slot (counted from now).
   void extend_guest(uint16_t slot, uint32_t valid_s);
+  /// Give a slot a name (synced slots: on all nodes, one version). Empty name removes it.
+  void set_slot_name(uint16_t slot, const std::string &name);
+  /// Name of a slot, empty if it has none.
+  std::string slot_name(uint16_t slot) const {
+    auto it = this->names_.find(slot);
+    return it == this->names_.end() ? std::string() : it->second;
+  }
   /// Expiry of a slot as unix time, 0 = never.
   uint32_t slot_expiry(uint16_t slot) const { return slot < this->expires_.size() ? this->expires_[slot] : 0; }
   /// Lockout active (too many failed attempts here, or passed on by a peer).
@@ -450,6 +458,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   text_sensor::TextSensor *status_text_sensor_{nullptr};
   text_sensor::TextSensor *occupied_text_sensor_{nullptr};
   text_sensor::TextSensor *unreachable_text_sensor_{nullptr};
+  text_sensor::TextSensor *last_name_text_sensor_{nullptr};
   uint32_t last_occupied_ms_{0};
   void publish_occupied_();
 #endif
@@ -541,6 +550,8 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   AdminArm armed_{AdminArm::NONE};
   uint32_t armed_until_ms_{0};
   uint16_t pending_guest_slot_{NO_SLOT};
+  uint16_t pending_name_slot_{NO_SLOT};  // name given with enroll_next_free / enroll_guest
+  std::string pending_name_;
   uint32_t pending_guest_expiry_{0};
   uint32_t last_expiry_check_ms_{0};
   bool last_round_ok_{true};

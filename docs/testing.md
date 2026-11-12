@@ -47,7 +47,9 @@ End-to-end scenarios:
     `share_with`; both unlock after the duration; a duress finger fires `on_duress`.
 15. Time windows: `is_allowed` for an open window, a closed window, a slot without schedule and
     windows over midnight; a finger outside its window fires `on_denied`.
-16. `SetPwd` is never sent to any sensor.
+16. Names: a name set on one node reaches the others, shows up in `last_name`, survives a restart,
+    is kept in backups and can be given at enrollment.
+17. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
 `fingerprint_grow` and `fingerprint_grow_plus` with synthetic templates (no real biometric data).

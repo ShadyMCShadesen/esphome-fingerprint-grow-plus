@@ -133,6 +133,27 @@ Einlernen mit der Admin-Geste 5× oder `fingerprint_grow_plus.enroll_guest`; ver
 `fingerprint_grow_plus.extend_guest`. Nach Ablauf wird der Finger gelöscht, mit Sync auf allen
 Geräten.
 
+## Namen
+
+Slots können einen Namen tragen (bis 24 Byte, UTF-8). Mit Sync wandert er mit dem Finger auf alle
+Geräte.
+
+```yaml
+# Namen setzen
+- fingerprint_grow_plus.set_name: {slot: 12, name: "Anna Zeigefinger"}
+# mit Namen einlernen
+- fingerprint_grow_plus.enroll_next_free: {num_scans: 3, name: "Ben"}
+# verwenden, z. B. in on_finger_scan_matched
+- logger.log:
+    format: "Willkommen %s"
+    args: ['id(fp_plus).slot_name(finger_id).c_str()']
+```
+
+Der Text-Sensor `last_name` zeigt den Namen des zuletzt erkannten Fingers (`#<slot>` ohne Namen),
+Backups behalten die Namen. Namen belegen RAM und Flash nur für Slots, die einen haben, und werden
+nur bei einer Änderung in den Flash geschrieben. Das Umbenennen eines synchronisierten Slots
+verbraucht eine Sync-Version.
+
 ## Sperre nach Fehlversuchen und Notfall-Finger
 
 ```yaml

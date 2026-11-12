@@ -28,6 +28,7 @@ CONF_HOST = "host"
 CONF_SLOT = "slot"
 CONF_SLOTS = "slots"
 CONF_CODE = "code"
+CONF_NAME_ = "name"
 CONF_KEEP_LOCAL = "keep_local"
 
 # general
@@ -710,13 +711,29 @@ def _simple(name, call):
 
 # --- general ---------------------------------------------------------------------------
 
+_NAME = cv.templatable(cv.string)
+
 _action(
     "enroll_next_free",
     cv.maybe_simple_value(
-        {_PARENT: _PARENT_ID, cv.Optional(CONF_NUM_SCANS, default=3): _NUM_SCANS},
+        {
+            _PARENT: _PARENT_ID,
+            cv.Optional(CONF_NUM_SCANS, default=3): _NUM_SCANS,
+            # Optional name of the new finger (synced with it).
+            cv.Optional(CONF_NAME_, default=""): _NAME,
+        },
         key=CONF_NUM_SCANS,
     ),
-    automation.ApplyField(CONF_NUM_SCANS, "enroll_next_free", cg.uint8),
+    automation.ApplyCall(
+        "enroll_next_free({}, {})", ((CONF_NUM_SCANS, cg.uint8), (CONF_NAME_, cg.std_string))
+    ),
+)
+_action(
+    "set_name",
+    cv.Schema({_PARENT: _PARENT_ID, cv.Required(CONF_SLOT): _SLOT, cv.Required(CONF_NAME_): _NAME}),
+    automation.ApplyCall(
+        "set_slot_name({}, {})", ((CONF_SLOT, cg.uint16), (CONF_NAME_, cg.std_string))
+    ),
 )
 _action(
     "delete",
@@ -760,10 +777,12 @@ _action(
             _PARENT: _PARENT_ID,
             cv.Optional(CONF_NUM_SCANS, default=3): _NUM_SCANS,
             cv.Optional(CONF_VALID_FOR, default="7d"): _VALID_FOR,
+            cv.Optional(CONF_NAME_, default=""): _NAME,
         }
     ),
     automation.ApplyCall(
-        "enroll_guest({}, {})", ((CONF_NUM_SCANS, cg.uint8), (CONF_VALID_FOR, cg.uint32))
+        "enroll_guest({}, {}, {})",
+        ((CONF_NUM_SCANS, cg.uint8), (CONF_VALID_FOR, cg.uint32), (CONF_NAME_, cg.std_string)),
     ),
 )
 _action(

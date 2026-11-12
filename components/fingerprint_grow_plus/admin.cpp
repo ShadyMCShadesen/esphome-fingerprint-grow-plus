@@ -64,6 +64,15 @@ void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id, uint16_t conf
   this->last_activity_ms_ = now;
   this->lockout_matched_(finger_id, confidence);
   this->schedule_matched_(finger_id);
+#ifdef USE_TEXT_SENSOR
+  if (this->last_name_text_sensor_ != nullptr) {
+    std::string name = this->slot_name(finger_id);
+    if (name.empty())
+      name = "#" + to_string(finger_id);
+    ESP_LOGD(TAG, "Last name: %s", name.c_str());
+    this->last_name_text_sensor_->publish_state(name);
+  }
+#endif
   if (!this->admin_enabled_)
     return;
   const bool admin = this->is_admin_slot(finger_id);
@@ -252,7 +261,7 @@ bool FingerprintGrowPlusComponent::time_now_(uint32_t &epoch) const {
   return false;
 }
 
-void FingerprintGrowPlusComponent::enroll_guest(uint8_t num_scans, uint32_t valid_s) {
+void FingerprintGrowPlusComponent::enroll_guest(uint8_t num_scans, uint32_t valid_s, const std::string &name) {
   if (!this->guests_enabled_) {
     ESP_LOGW(TAG, "Guest enrollment refused: no guest slots configured");
     return;
@@ -272,6 +281,8 @@ void FingerprintGrowPlusComponent::enroll_guest(uint8_t num_scans, uint32_t vali
     return;
   }
   this->pending_guest_slot_ = (uint16_t) slot;
+  this->pending_name_slot_ = name.empty() ? NO_SLOT : (uint16_t) slot;
+  this->pending_name_ = name;
   this->pending_guest_expiry_ = now + valid_s;
   ESP_LOGI(TAG, "Enrolling guest in slot %" PRId32 ", valid for %" PRIu32 " h", slot, valid_s / 3600);
   this->enroll_started_cb_.call((uint16_t) slot);

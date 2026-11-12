@@ -12,6 +12,7 @@ DEPENDENCIES = ["fingerprint_grow_plus"]
 CONF_OCCUPIED_SLOTS = "occupied_slots"
 
 CONF_UNREACHABLE_PEERS = "unreachable_peers"
+CONF_LAST_NAME = "last_name"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -27,6 +28,8 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_UNREACHABLE_PEERS): text_sensor.text_sensor_schema(
             icon="mdi:lan-disconnect", entity_category=ENTITY_CATEGORY_DIAGNOSTIC
         ),
+        # Name of the last recognised finger ("#<slot>" if it has none).
+        cv.Optional(CONF_LAST_NAME): text_sensor.text_sensor_schema(icon="mdi:account"),
     }
 )
 
@@ -37,6 +40,7 @@ async def to_code(config):
         (CONF_STATUS, parent.set_status_text_sensor),
         (CONF_OCCUPIED_SLOTS, parent.set_occupied_text_sensor),
         (CONF_UNREACHABLE_PEERS, parent.set_unreachable_text_sensor),
+        (CONF_LAST_NAME, parent.set_last_name_text_sensor),
     ):
         if key in config:
             cg.add(setter(await text_sensor.new_text_sensor(config[key])))

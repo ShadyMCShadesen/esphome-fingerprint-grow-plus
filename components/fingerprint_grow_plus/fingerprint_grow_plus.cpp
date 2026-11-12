@@ -79,6 +79,12 @@ void FingerprintGrowPlusComponent::setup() {
     if (!this->params_loaded_ || slot >= this->capacity_)
       return;
     this->local_present_[slot] = true;
+    if (slot == this->pending_name_slot_) {
+      // Set before the version is assigned (HASH job), so the name travels with this version.
+      this->set_name_(slot, this->pending_name_);
+      this->pending_name_slot_ = NO_SLOT;
+      this->pending_name_.clear();
+    }
     if (!this->managed_(slot)) {
       // Local-only slot (outside include/exclude): no version, no hash, only the guest expiry.
       if (slot == this->pending_guest_slot_) {
@@ -94,6 +100,8 @@ void FingerprintGrowPlusComponent::setup() {
   this->grow_->add_on_enrollment_failed_callback([this](uint16_t) {
     this->enrolling_ = false;
     this->pending_guest_slot_ = NO_SLOT;
+    this->pending_name_slot_ = NO_SLOT;
+    this->pending_name_.clear();
     this->last_activity_ms_ = millis();
   });
 
@@ -661,6 +669,23 @@ bool FingerprintGrowPlusComponent::store_verified_(uint8_t buffer, uint16_t slot
   return ok;
 }
 
+void FingerprintGrowPlusComponent::set_slot_name(uint16_t slot, const std::string &name) {
+  if (!this->indexed_once_ || slot >= this->capacity_ || !this->local_present_[slot]) {
+    ESP_LOGW(TAG, "set_name: slot %u holds no finger", slot);
+    return;
+  }
+  if (this->slot_name(slot) == name)
+    return;
+  this->set_name_(slot, name);
+  if (this->managed_(slot) && meta_present(this->meta_[slot])) {
+    // Same template, new version: peers adopt the name without moving the template.
+    this->meta_[slot] = meta_pack(meta_state(this->meta_[slot]), this->next_version_());
+    this->mark_dirty_();
+    this->request_change_round_(PUSH_DELAY_MS);
+  }
+  ESP_LOGI(TAG, "Slot %u named '%s'", slot, this->slot_name(slot).c_str());
+}
+
 SlotExtra FingerprintGrowPlusComponent::extra_of_(uint16_t slot) const {
   SlotExtra e;
   if (slot < this->expires_.size())
@@ -695,7 +720,10 @@ void FingerprintGrowPlusComponent::set_name_(uint16_t slot, const std::string &n
   } else {
     if (it != this->names_.end() && it->second == name)
       return;
-    this->names_[slot] = name.substr(0, MAX_NAME_LEN);
+    size_t len = std::min(name.size(), MAX_NAME_LEN);
+    while (len > 0 && len < name.size() && ((uint8_t) name[len] & 0xC0) == 0x80)
+      len--;  // do not cut a UTF-8 character in half
+    this->names_[slot] = name.substr(0, len);
   }
   this->names_dirty_ = true;
   this->mark_dirty_();
@@ -968,7 +996,7 @@ int32_t FingerprintGrowPlusComponent::next_free_slot() const {
   return this->next_free_in_(this->enroll_from_, this->enroll_to_, false);
 }
 
-void FingerprintGrowPlusComponent::enroll_next_free(uint8_t num_scans) {
+void FingerprintGrowPlusComponent::enroll_next_free(uint8_t num_scans, const std::string &name) {
   if (!this->indexed_once_) {
     ESP_LOGW(TAG, "Enrollment refused: index not ready yet");
     return;
@@ -983,6 +1011,8 @@ void FingerprintGrowPlusComponent::enroll_next_free(uint8_t num_scans) {
     return;
   }
   ESP_LOGI(TAG, "Enrolling next free slot %" PRId32 " with %u scans", slot, num_scans);
+  this->pending_name_slot_ = name.empty() ? NO_SLOT : (uint16_t) slot;
+  this->pending_name_ = name;
   this->enroll_started_cb_.call((uint16_t) slot);
   this->grow_->enroll_fingerprint((uint16_t) slot, num_scans);
 }

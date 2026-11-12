@@ -179,6 +179,8 @@ text_sensor:
       name: Occupied slots
     unreachable_peers:
       name: Unreachable peers
+    last_name:
+      name: Last name
 fingerprint_grow_plus:
   id: fp_plus
   startup_delay: 2s
@@ -231,7 +233,9 @@ interval:
           if (f == nullptr) return;
           char cmd[32] = {{0}};
           int a = 0, b = 0;
-          int n = fscanf(f, "%31s %d %d", cmd, &a, &b);
+          char arg[64] = {{0}};
+          int n = fscanf(f, "%31s %d %63s", cmd, &a, arg);
+          b = atoi(arg);
           fclose(f);
           remove("{cmd}");
           if (n < 1) return;
@@ -239,6 +243,9 @@ interval:
           if (c == "delete") id(fp_plus).delete_slot(a);
           else if (c == "resolve") id(fp_plus).resolve_conflict(a, b != 0);
           else if (c == "sync") id(fp_plus).sync_now();
+          else if (c == "name") id(fp_plus).set_slot_name(a, arg);
+          else if (c == "showname") ESP_LOGD("test", "TEST-EVENT name %d %s", a, id(fp_plus).slot_name(a).c_str());
+          else if (c == "enroll_named") id(fp_plus).enroll_next_free(a, arg);
           else if (c == "allowed") ESP_LOGD("test", "TEST-EVENT allowed %d %d", a, id(fp_plus).is_allowed(a) ? 1 : 0);
           else if (c == "finger_on") id(finger_detected).publish_state(true);
           else if (c == "finger_off") id(finger_detected).publish_state(false);
@@ -447,6 +454,22 @@ def main():
             "dry-run node E logs planned writes but its sensor stays unchanged",
             lambda: "[dry run] would store slot 0" in c.log("node-e") and c.slots("node-e") == {9: "grace"}, 60))
 
+        print("== Scenario 1c: slot names")
+        c.cmd("node-a", "name 0 Chef")
+        time.sleep(2)
+
+        def name_on(node, slot, name):
+            c.cmd(node, f"showname {slot}")
+            time.sleep(1.5)
+            return f"TEST-EVENT name {slot} {name}" in c.log(node)
+
+        results.append(wait_until("a name set on A reaches B with the slot",
+                                  lambda: name_on("node-b", 0, "Chef"), 60))
+        c.touch("node-b", "admin")
+        results.append(wait_until("last_name shows the name of the recognised finger",
+                                  lambda: "Last name: Chef" in c.log("node-b"), 10))
+        time.sleep(4)  # let the single admin touch close
+
         print("== Scenario 2: node A becomes the reference (resolve_all_conflicts keep_local)")
         c.cmd("node-a", "resolve_all 1")
         results.append(wait_until(
@@ -542,6 +565,8 @@ def main():
         time.sleep(1)
         c.start_node("node-a")
         time.sleep(20)
+        results.append(wait_until("the name survives the restart of A",
+                                  lambda: name_on("node-a", 0, "Chef"), 20))
         results.append(wait_until("after restart of A nothing deleted came back",
                                   lambda: all(s not in c.slots(n) for n in ("node-a", "node-b", "node-c") for s in (1, 5)),
                                   20))
@@ -553,6 +578,7 @@ def main():
         res = subprocess.run(tool + ["backup", "--host", "127.0.0.1", "--port", "18531", "--out", str(backup)],
                              capture_output=True, text=True, env=env, check=False)
         print(res.stdout + res.stderr)
+        results.append(wait_until("the backup keeps slot names", lambda: "slot 0: 1536 bytes  Chef" in res.stdout, 1))
         results.append(wait_until("backup contains slots 0, 2, 3",
                                   lambda: res.returncode == 0 and all(f"  slot {n}:" in res.stdout for n in (0, 2, 3)), 1))
         raw = backup.read_bytes() if backup.exists() else b""
@@ -757,6 +783,14 @@ def main():
         results.append(wait_until("G's local fingers never reach A",
                                   lambda: all(f not in c.slots("node-a").values() for f in ("gina", "hank")), 1))
 
+        c.cmd("node-g", "enroll_named 2 Ivo")
+        results.append(wait_until("enroll_next_free with a name starts an enrollment",
+                                  lambda: "TEST-EVENT enroll_started 3" in c.log("node-g"), 15))
+        time.sleep(1.5)
+        c.touches("node-g", "ivo", 2, gap=1.5)
+        results.append(wait_until("the new finger carries its name",
+                                  lambda: c.slots("node-g").get(3) == "ivo" and name_on("node-g", 3, "Ivo"), 30))
+
         print("== Scenario 11b: backup and restore of local-only slots (--include-local)")
         g_port = str(NODES["node-g"]["port"])
 
@@ -783,7 +817,7 @@ def main():
                                   and "  slot 1: 1536 bytes (local only)" in res.stdout
                                   and "  slot 2: 1536 bytes (local only)" in res.stdout, 1))
         results.append(wait_until("node logs the full backup with synced and local counts",
-                                  lambda: "template(s) sent (1 synced, 2 local-only)" in c.log("node-g"), 5))
+                                  lambda: "template(s) sent (1 synced, 3 local-only)" in c.log("node-g"), 5))
 
         # The permission belongs to that one session: a later session must not get local slots,
         # even while the window is still open, unless it asks for them itself.
