@@ -10,6 +10,7 @@ Exit code 0 = all scenarios passed.
 
 import argparse
 import base64
+import re
 import json
 import os
 from pathlib import Path
@@ -246,6 +247,9 @@ interval:
           else if (c == "name") id(fp_plus).set_slot_name(a, arg);
           else if (c == "showname") ESP_LOGD("test", "TEST-EVENT name %d %s", a, id(fp_plus).slot_name(a).c_str());
           else if (c == "enroll_named") id(fp_plus).enroll_next_free(a, arg);
+          else if (c == "enroll_guest_uses") id(fp_plus).enroll_guest(2, 600, "", a);
+          else if (c == "showuses") ESP_LOGD("test", "TEST-EVENT uses %d %u", a, id(fp_plus).slot_uses_left(a));
+          else if (c == "move") id(fp_plus).move_slot(a, b);
           else if (c == "allowed") ESP_LOGD("test", "TEST-EVENT allowed %d %d", a, id(fp_plus).is_allowed(a) ? 1 : 0);
           else if (c == "finger_on") id(finger_detected).publish_state(true);
           else if (c == "finger_off") id(finger_detected).publish_state(false);
@@ -534,6 +538,34 @@ def main():
         results.append(wait_until("guest expired and was deleted on all nodes",
                                   lambda: all(100 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 120))
 
+        print("== Scenario 3e: guest with a number of uses")
+        time.sleep(3)
+        c.cmd("node-a", "enroll_guest_uses 2")
+        results.append(wait_until("guest enrollment with 2 uses started",
+                                  lambda: "2 use(s)" in c.log("node-a"), 10))
+        found = re.search(r"Enrolling guest in slot (\d+)[^\n]*2 use\(s\)", c.log("node-a"))
+        gslot = int(found.group(1)) if found else -1
+        time.sleep(1.5)
+        c.touches("node-a", "gus", 2, gap=1.5)
+        results.append(wait_until("guest gus reached A, B and C",
+                                  lambda: all(c.slots(n).get(gslot) == "gus" for n in ("node-a", "node-b", "node-c")),
+                                  45))
+        time.sleep(3)
+        c.touch("node-a", "gus")
+        results.append(wait_until("first use counted on A",
+                                  lambda: f"Guest in slot {gslot}: 1 use(s) left" in c.log("node-a"), 10))
+
+        def uses_on(node, slot, n):
+            c.cmd(node, f"showuses {slot}")
+            time.sleep(1.5)
+            return f"TEST-EVENT uses {slot} {n}" in c.log(node)
+
+        results.append(wait_until("the remaining uses reach B", lambda: uses_on("node-b", gslot, 1), 45))
+        time.sleep(11)  # one use per 10 s and slot
+        c.touch("node-b", "gus")  # the last use may happen at any node
+        results.append(wait_until("the last use deletes the guest on A, B and C",
+                                  lambda: all(gslot not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 60))
+
         print("== Scenario 3d: admin fingers are protected")
         c.cmd("node-a", "delete 9")
         time.sleep(3)
@@ -689,6 +721,17 @@ def main():
         c.touch("node-a", "frank")
         results.append(wait_until("frank (slot 3) deleted on A, B and C by the admin gesture",
                                   lambda: all(3 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 60))
+
+        print("== Scenario 9b: move a finger to another slot")
+        before = c.slots("node-a").get(2)
+        c.cmd("node-a", "move 2 33")
+        results.append(wait_until("the finger moved from slot 2 to 33 on A, B and C",
+                                  lambda: before is not None and all(c.slots(n).get(33) == before and 2 not in c.slots(n)
+                                                                     for n in ("node-a", "node-b", "node-c")), 60))
+        c.cmd("node-a", "move 0 34")
+        time.sleep(3)
+        results.append(wait_until("an admin slot cannot be moved",
+                                  lambda: "admin slots cannot be moved" in c.log("node-a") and 34 not in c.slots("node-a"), 1))
 
         print("== Scenario 10: stand-alone node (no sync: block) enrolls with the admin gesture")
         results.append(wait_until("stand-alone node reports the network sync as off",

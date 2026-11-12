@@ -129,6 +129,15 @@ fingerprint_grow_plus:
   guests: "150-179"      # 7 Tage gültig; oder {slots: "150-179", valid_for: 2d}
 ```
 
+**Anzahl Nutzungen** (optional): `guests: {slots: "150-179", uses: 3}` (Standard für die Geste)
+oder `enroll_guest: {uses: 3}`. Jede Erkennung zählt eine Nutzung (ein aufliegender Finger zählt
+höchstens einmal pro 10 s); die letzte Nutzung öffnet noch und löscht den Gast dann, mit Sync auf
+allen Geräten. Mit Sync kostet jede Nutzung eine Sync-Version. `0` = unbegrenzt (Standard).
+
+**Slot verschieben:** `fingerprint_grow_plus.move_slot: {from: 12, to: 40}` verschiebt einen Finger
+samt Namen und Gastdaten auf einen freien Slot, mit Sync auf allen Geräten. Admin-Slots lassen
+sich nicht verschieben, das Ziel muss überall frei sein.
+
 Einlernen mit der Admin-Geste 5× oder `fingerprint_grow_plus.enroll_guest`; verlängern mit
 `fingerprint_grow_plus.extend_guest`. Nach Ablauf wird der Finger gelöscht, mit Sync auf allen
 Geräten.

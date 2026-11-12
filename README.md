@@ -176,6 +176,11 @@ fingerprint_grow_plus:
   guests: "150-179"      # valid 7 days; or {slots: "150-179", valid_for: 2d}
 ```
 
+**Number of uses** (optional): `guests: {slots: "150-179", uses: 3}` (default for the gesture) or
+`enroll_guest: {uses: 3}`. Every recognition counts one use (a finger resting on the sensor counts
+once per 10 s); the last use still opens and then deletes the guest, with sync on all nodes. With
+sync every use costs one sync version. `0` = unlimited (default).
+
 Enroll a guest with the 5-touch gesture or `fingerprint_grow_plus.enroll_guest`;
 `fingerprint_grow_plus.extend_guest` sets a new validity. Once expired, the finger is deleted.
 With sync the expiry date travels with the finger, and the first node that notices the expiry
@@ -386,6 +391,7 @@ fingerprint_grow_plus:
   guests:
     slots: "150-179"                  # at most 64 slots, outside the admin slots
     valid_for: 7d
+    uses: 0                           # uses per guest, 0 = unlimited
 
   lockout:
     max_attempts: 5                   # unrecognised fingers in a row
@@ -435,6 +441,7 @@ fingerprint_grow_plus:
 | Action | Parameters | Effect |
 |---|---|---|
 | `enroll_next_free` | `num_scans` (3), `name` | enroll the lowest free slot (with sync: free on all nodes) |
+| `move_slot` | `from`, `to` | move a finger with its name and guest data to a free slot; synced slots on all nodes |
 | `set_name` | `slot`, `name` | name a slot (empty name removes it); synced slots on all nodes |
 | `delete` | `slot` | delete a finger (with sync: on all nodes); admin slots refused |
 | `delete_all` | `code` | delete all fingers except the admin fingers (with sync: on all nodes) |
@@ -442,7 +449,7 @@ fingerprint_grow_plus:
 | `reenroll_next_finger` | – | the next finger shown is enrolled again into its slot |
 | `cancel_admin` | – | cancel a pending admin action |
 | `delete_admin` | `slot`, `code` | delete an admin finger |
-| `enroll_guest` | `num_scans` (3), `valid_for` (7d), `name` | enroll the next free guest slot |
+| `enroll_guest` | `num_scans` (3), `valid_for` (7d), `name`, `uses` | enroll the next free guest slot |
 | `extend_guest` | `slot`, `valid_for` (7d) | new validity for a guest |
 | `sync` | – | start a sync round now |
 | `claim_all_slots` | – | this node's fingers replace the same slots on all nodes |
@@ -456,7 +463,7 @@ fingerprint_grow_plus:
 All actions are called as `fingerprint_grow_plus.<action>`.
 Conditions: `fingerprint_grow_plus.is_ready`, `is_syncing`, `is_admin_busy`, `is_admin_slot`,
 `is_locked`, `is_duress_slot`, `is_allowed`.
-Lambdas: `id(fp_plus).slot_name(slot)`, `health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
+Lambdas: `id(fp_plus).slot_name(slot)`, `slot_uses_left(slot)`, `health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
 
 ### Entities (all optional)
 

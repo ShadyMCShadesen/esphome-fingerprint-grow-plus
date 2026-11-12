@@ -49,7 +49,10 @@ End-to-end scenarios:
     windows over midnight; a finger outside its window fires `on_denied`.
 16. Names: a name set on one node reaches the others, shows up in `last_name`, survives a restart,
     is kept in backups and can be given at enrollment.
-17. `SetPwd` is never sent to any sensor.
+17. A guest with 2 uses: the remaining uses reach the peers, the last use (on another node)
+    deletes it everywhere. A finger moved from one slot to another follows on all nodes; admin
+    slots cannot be moved.
+18. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
 `fingerprint_grow` and `fingerprint_grow_plus` with synthetic templates (no real biometric data).

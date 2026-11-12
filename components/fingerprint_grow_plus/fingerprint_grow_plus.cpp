@@ -25,7 +25,6 @@ static constexpr uint32_t HANDSHAKE_TIMEOUT_MS = 5000;
 static constexpr size_t SESSION_TX_LIMIT = 16 * 1024;
 static constexpr uint32_t SESSION_MAX_MS = 10 * 60 * 1000;
 static constexpr uint32_t META_SAVE_DEBOUNCE_MS = 2000;
-static constexpr uint32_t PUSH_DELAY_MS = 2000;
 static constexpr uint32_t SENSOR_RETRY_MS = 30000;
 static constexpr uint16_t MAX_CAPACITY = 1024;
 static constexpr size_t MAX_QUEUED_JOBS = 64;
@@ -89,6 +88,7 @@ void FingerprintGrowPlusComponent::setup() {
       // Local-only slot (outside include/exclude): no version, no hash, only the guest expiry.
       if (slot == this->pending_guest_slot_) {
         this->set_expiry_(slot, this->pending_guest_expiry_);
+        this->set_uses_(slot, this->pending_guest_uses_);
         this->pending_guest_slot_ = NO_SLOT;
       }
       ESP_LOGI(TAG, "Slot %u enrolled locally; it is not synced (outside the synced slots)", slot);
@@ -394,6 +394,9 @@ void FingerprintGrowPlusComponent::run_next_job_() {
       this->save_queued_ = false;
       this->job_save_meta_();
       break;
+    case JobType::MOVE:
+      this->job_move_(job);
+      break;
       break;
   }
   if (!job.data.empty())
@@ -579,9 +582,11 @@ void FingerprintGrowPlusComponent::job_hash_(Job &job) {
     bool was_present = meta_present(this->meta_[slot]);
     if (slot == this->pending_guest_slot_) {
       this->set_expiry_(slot, this->pending_guest_expiry_);
+      this->set_uses_(slot, this->pending_guest_uses_);
       this->pending_guest_slot_ = NO_SLOT;
     } else if (!was_present) {
-      this->set_expiry_(slot, 0);  // a re-enrolled guest keeps its expiry
+      this->set_expiry_(slot, 0);  // a re-enrolled guest keeps its expiry and uses
+      this->set_uses_(slot, 0);
     }
     // Enrolling over an occupied slot is a deliberate replacement and may overwrite peers.
     this->meta_[slot] = meta_pack(was_present ? SLOT_PRESENT_FORCED : SLOT_PRESENT, this->next_version_());
@@ -949,6 +954,75 @@ void FingerprintGrowPlusComponent::delete_slot(uint16_t slot) {
   job.slot = slot;
   job.flags = JOB_FLAG_LOCAL | (this->managed_(slot) ? JOB_FLAG_PROPAGATE : 0);
   this->queue_job_(std::move(job));
+}
+
+bool FingerprintGrowPlusComponent::slot_free_everywhere_(uint16_t slot) const {
+  if (slot >= this->capacity_ || this->local_present_[slot])
+    return false;
+  if (!this->managed_(slot))
+    return true;
+  return !this->remote_present_[slot] && !this->conflict_[slot] && !meta_present(this->meta_[slot]);
+}
+
+void FingerprintGrowPlusComponent::move_slot(uint16_t from, uint16_t to) {
+  if (!this->indexed_once_ || this->enrolling_) {
+    ESP_LOGW(TAG, "move_slot refused: index not ready or an enrollment is running");
+    return;
+  }
+  if (from >= this->capacity_ || !this->local_present_[from]) {
+    ESP_LOGW(TAG, "move_slot refused: slot %u holds no finger", from);
+    return;
+  }
+  if (this->is_admin_slot(from) || this->is_admin_slot(to)) {
+    ESP_LOGW(TAG, "move_slot refused: admin slots cannot be moved or overwritten");
+    return;
+  }
+  if (!this->slot_free_everywhere_(to)) {
+    ESP_LOGW(TAG, "move_slot refused: slot %u is not free (here or on a peer)", to);
+    return;
+  }
+  ESP_LOGI(TAG, "Moving slot %u to %u", from, to);
+  Job job;
+  job.type = JobType::MOVE;
+  job.slot = from;
+  job.meta = to;
+  this->queue_job_(std::move(job));
+}
+
+void FingerprintGrowPlusComponent::job_move_(Job &job) {
+  const uint16_t from = job.slot, to = job.meta;
+  std::vector<uint8_t> data;
+  uint8_t res = this->link_.read_template(from, data);
+  if (res != GROW_OK) {
+    ESP_LOGE(TAG, "Moving slot %u failed: reading it failed (0x%02X)", from, res);
+    this->error_count_++;
+    return;
+  }
+  res = this->link_.down_char(1, data);
+  const bool ok = res == GROW_OK && this->store_verified_(1, to, data);
+  uint8_t digest[32];
+  crypto::sha256(data.data(), data.size(), digest);
+  crypto::wipe(data.data(), data.size());
+  if (!ok) {
+    ESP_LOGE(TAG, "Moving slot %u failed: storing it in slot %u failed", from, to);
+    this->error_count_++;
+    return;
+  }
+  // The copy carries the name and guest data; the old slot is deleted (with sync: everywhere).
+  const SlotExtra extra = this->extra_of_(from);
+  if (this->managed_(to)) {
+    this->apply_stored_(to, meta_pack(SLOT_PRESENT, this->next_version_()), digest, extra);
+  } else {
+    this->local_present_[to] = true;
+    this->set_extra_(to, extra);
+  }
+  ESP_LOGI(TAG, "Slot %u moved to %u", from, to);
+  Job del;
+  del.type = JobType::DELETE;
+  del.slot = from;
+  del.flags = JOB_FLAG_LOCAL | (this->managed_(from) ? JOB_FLAG_PROPAGATE : 0);
+  this->queue_job_(std::move(del));
+  this->request_change_round_(PUSH_DELAY_MS);
 }
 
 void FingerprintGrowPlusComponent::delete_all(const std::string &code) {

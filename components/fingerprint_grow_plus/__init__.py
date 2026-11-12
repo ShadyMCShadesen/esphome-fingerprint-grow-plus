@@ -105,6 +105,9 @@ WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
 # guests:
 CONF_GUESTS = "guests"
 CONF_VALID_FOR = "valid_for"
+CONF_USES = "uses"
+CONF_FROM_SLOT = "from"
+CONF_TO_SLOT = "to"
 
 DEFAULT_PORT = 18530
 
@@ -391,6 +394,8 @@ GUESTS_SCHEMA = cv.maybe_simple_value(
     {
         cv.Required(CONF_SLOTS): validate_slot_range,
         cv.Optional(CONF_VALID_FOR, default="7d"): cv.positive_time_period_seconds,
+        # Uses per guest (0 = unlimited); the last use deletes the guest.
+        cv.Optional(CONF_USES, default=0): cv.int_range(min=0, max=250),
     },
     key=CONF_SLOTS,
 )
@@ -629,6 +634,7 @@ async def to_code(config):
     if guests := config.get(CONF_GUESTS):
         low, high = guests[CONF_SLOTS]
         cg.add(var.set_guests(low, high, guests[CONF_VALID_FOR]))
+        cg.add(var.set_guest_uses(guests[CONF_USES]))
 
     if lockout := config.get(CONF_LOCKOUT):
         cg.add(
@@ -729,6 +735,11 @@ _action(
     ),
 )
 _action(
+    "move_slot",
+    cv.Schema({_PARENT: _PARENT_ID, cv.Required(CONF_FROM_SLOT): _SLOT, cv.Required(CONF_TO_SLOT): _SLOT}),
+    automation.ApplyCall("move_slot({}, {})", ((CONF_FROM_SLOT, cg.uint16), (CONF_TO_SLOT, cg.uint16))),
+)
+_action(
     "set_name",
     cv.Schema({_PARENT: _PARENT_ID, cv.Required(CONF_SLOT): _SLOT, cv.Required(CONF_NAME_): _NAME}),
     automation.ApplyCall(
@@ -778,11 +789,18 @@ _action(
             cv.Optional(CONF_NUM_SCANS, default=3): _NUM_SCANS,
             cv.Optional(CONF_VALID_FOR, default="7d"): _VALID_FOR,
             cv.Optional(CONF_NAME_, default=""): _NAME,
+            # Uses for this guest (0 = unlimited); default: guests: uses
+            cv.Optional(CONF_USES, default=-1): cv.templatable(cv.int_range(min=-1, max=250)),
         }
     ),
     automation.ApplyCall(
-        "enroll_guest({}, {}, {})",
-        ((CONF_NUM_SCANS, cg.uint8), (CONF_VALID_FOR, cg.uint32), (CONF_NAME_, cg.std_string)),
+        "enroll_guest({}, {}, {}, {})",
+        (
+            (CONF_NUM_SCANS, cg.uint8),
+            (CONF_VALID_FOR, cg.uint32),
+            (CONF_NAME_, cg.std_string),
+            (CONF_USES, cg.int16),
+        ),
     ),
 )
 _action(

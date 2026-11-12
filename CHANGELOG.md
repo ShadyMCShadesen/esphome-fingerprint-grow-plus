@@ -15,6 +15,9 @@ versioning: [Semantic Versioning](https://semver.org/).
 - `lockout:` (optional): lock after failed attempts, condition `is_locked`, actions
   `register_failed_attempt` / `reset_lockout`, entities `failed_attempts` / `locked`;
   `share_with` passes a lockout on to selected peers (protocol version 5, message `LOCK`).
+- Guests with a number of uses (`guests: uses`, `enroll_guest: uses`); the last use deletes the
+  guest on all nodes; lambda `slot_uses_left()`.
+- `move_slot`: move a finger with its name and guest data to a free slot, on all nodes.
 - Slot names: action `set_name`, `name:` for `enroll_next_free` / `enroll_guest`, lambda
   `slot_name()`, text sensor `last_name`; synced with the slot and kept in backups.
 - Protocol version 6: every slot version carries its extras (expiry, guest uses, name); the

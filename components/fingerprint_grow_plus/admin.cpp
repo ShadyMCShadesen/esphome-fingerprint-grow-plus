@@ -64,6 +64,7 @@ void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id, uint16_t conf
   this->last_activity_ms_ = now;
   this->lockout_matched_(finger_id, confidence);
   this->schedule_matched_(finger_id);
+  this->guest_used_(finger_id);
 #ifdef USE_TEXT_SENSOR
   if (this->last_name_text_sensor_ != nullptr) {
     std::string name = this->slot_name(finger_id);
@@ -261,7 +262,8 @@ bool FingerprintGrowPlusComponent::time_now_(uint32_t &epoch) const {
   return false;
 }
 
-void FingerprintGrowPlusComponent::enroll_guest(uint8_t num_scans, uint32_t valid_s, const std::string &name) {
+void FingerprintGrowPlusComponent::enroll_guest(uint8_t num_scans, uint32_t valid_s, const std::string &name,
+                                                 int16_t uses) {
   if (!this->guests_enabled_) {
     ESP_LOGW(TAG, "Guest enrollment refused: no guest slots configured");
     return;
@@ -284,9 +286,37 @@ void FingerprintGrowPlusComponent::enroll_guest(uint8_t num_scans, uint32_t vali
   this->pending_name_slot_ = name.empty() ? NO_SLOT : (uint16_t) slot;
   this->pending_name_ = name;
   this->pending_guest_expiry_ = now + valid_s;
-  ESP_LOGI(TAG, "Enrolling guest in slot %" PRId32 ", valid for %" PRIu32 " h", slot, valid_s / 3600);
+  this->pending_guest_uses_ = uses < 0 ? this->guest_uses_ : (uint8_t) std::min<int16_t>(uses, 250);
+  ESP_LOGI(TAG, "Enrolling guest in slot %" PRId32 ", valid for %" PRIu32 " h, %s", slot, valid_s / 3600,
+           this->pending_guest_uses_ ? (to_string(this->pending_guest_uses_) + " use(s)").c_str() : "unlimited uses");
   this->enroll_started_cb_.call((uint16_t) slot);
   this->grow_->enroll_fingerprint((uint16_t) slot, num_scans);
+}
+
+void FingerprintGrowPlusComponent::guest_used_(uint16_t slot) {
+  if (slot >= this->uses_.size() || this->uses_[slot] == 0 || !this->local_present_[slot])
+    return;
+  // A finger resting on the sensor can be matched twice: count one use per 10 s and slot.
+  const uint32_t now = millis();
+  if (slot == this->last_guest_use_slot_ && !elapsed(now, this->last_guest_use_ms_, 10000))
+    return;
+  this->last_guest_use_slot_ = slot;
+  this->last_guest_use_ms_ = now;
+  const uint8_t left = this->uses_[slot] - 1;
+  if (left == 0) {
+    // This use still counts (the door opens); afterwards the guest is gone everywhere.
+    ESP_LOGI(TAG, "Guest in slot %u: last use, deleting it", slot);
+    this->delete_slot(slot);
+    return;
+  }
+  this->set_uses_(slot, left);
+  if (this->managed_(slot) && meta_present(this->meta_[slot])) {
+    // Same template, new version: peers adopt the remaining uses (one sync version per use).
+    this->meta_[slot] = meta_pack(meta_state(this->meta_[slot]), this->next_version_());
+    this->mark_dirty_();
+    this->request_change_round_(PUSH_DELAY_MS);
+  }
+  ESP_LOGI(TAG, "Guest in slot %u: %u use(s) left", slot, left);
 }
 
 void FingerprintGrowPlusComponent::extend_guest(uint16_t slot, uint32_t valid_s) {

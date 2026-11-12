@@ -39,6 +39,9 @@ struct Peer {
   uint16_t port;
 };
 
+/// Delay between a local change and the sync round that pushes it.
+static constexpr uint32_t PUSH_DELAY_MS = 2000;
+
 struct ScheduleWindow {
   uint8_t days;       // bit 0 = Sunday ... bit 6 = Saturday
   uint16_t from_min;  // minutes since midnight
@@ -66,6 +69,7 @@ enum class JobType : uint8_t {
   DELETE,
   COUNT,
   SAVE_META,
+  MOVE,  // slot -> meta (target slot)
 };
 
 enum JobFlag : uint8_t {
@@ -204,6 +208,8 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
     this->guest_to_ = to;
     this->guest_valid_s_ = valid_s;
   }
+  /// Default number of uses for guests (0 = unlimited).
+  void set_guest_uses(uint8_t uses) { this->guest_uses_ = uses; }
   void set_enroll_range(uint16_t from, uint16_t to) {
     this->enroll_from_ = from;
     this->enroll_to_ = to;
@@ -298,7 +304,12 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   /// Delete an admin slot on all nodes (admin slots are protected otherwise).
   void delete_admin(uint16_t slot, const std::string &code);
   /// Enroll the next free guest slot; it is deleted on all nodes after `valid_s` seconds.
-  void enroll_guest(uint8_t num_scans, uint32_t valid_s, const std::string &name = "");
+  /// `uses`: number of uses (0 = unlimited, -1 = the guests: default).
+  void enroll_guest(uint8_t num_scans, uint32_t valid_s, const std::string &name = "", int16_t uses = -1);
+  /// Move a finger to a free slot (with its name and guest data); synced slots on all nodes.
+  void move_slot(uint16_t from, uint16_t to);
+  /// Guest uses left, 0 = unlimited.
+  uint8_t slot_uses_left(uint16_t slot) const { return slot < this->uses_.size() ? this->uses_[slot] : 0; }
   /// Set a new validity for an existing guest slot (counted from now).
   void extend_guest(uint16_t slot, uint32_t valid_s);
   /// Give a slot a name (synced slots: on all nodes, one version). Empty name removes it.
@@ -437,6 +448,13 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint16_t guest_from_{0};
   uint16_t guest_to_{0};
   uint32_t guest_valid_s_{7 * 24 * 3600};
+  uint8_t guest_uses_{0};
+  uint8_t pending_guest_uses_{0};
+  uint16_t last_guest_use_slot_{NO_SLOT};
+  uint32_t last_guest_use_ms_{0};
+  void guest_used_(uint16_t slot);
+  void job_move_(Job &job);
+  bool slot_free_everywhere_(uint16_t slot) const;
   uint16_t enroll_from_{1};
   uint16_t enroll_to_{0xFFFF};
   binary_sensor::BinarySensor *finger_sensor_{nullptr};
