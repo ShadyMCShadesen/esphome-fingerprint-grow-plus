@@ -210,6 +210,33 @@ fingerprint_grow_plus:
   and additionally fires `on_duress`. Condition `fingerprint_grow_plus.is_duress_slot`.
 - Counter and lockout live in RAM only: nothing is written to flash, a reboot clears them.
 
+## Time windows
+
+```yaml
+fingerprint_grow_plus:
+  time_id: sntp_time
+  schedule:
+    without_time: deny         # while the time is unknown: deny (default) or allow
+    on_denied:                 # finger_id: a finger of a range matched outside its window
+      - logger.log: "outside the time window"
+    ranges:
+      - slots: "100-119"       # e.g. cleaning staff
+        times:
+          - days: [mon, wed]   # or mon-fri, daily, weekend
+            from: "08:00"
+            to: "12:00"
+      - slots: "120-129"
+        times:
+          - days: fri
+            from: "22:00"      # over midnight: until 06:00 on Saturday
+            to: "06:00"
+```
+
+The schedule only sets the condition `fingerprint_grow_plus.is_allowed: <finger_id>` (true when
+the slot has no schedule or one of its windows is open); add it to your door action. Slots without
+a schedule are always allowed; admin slots must not be in a schedule. Every node uses its own
+`schedule:` block, so put the same block on all nodes that should apply it.
+
 ## Sync
 
 ```yaml
@@ -353,6 +380,16 @@ fingerprint_grow_plus:
     slots: "190-199"                  # or just duress: "190-199"
     on_duress: []                     # finger_id, confidence
 
+  schedule:                           # needs time_id
+    without_time: deny                # deny | allow while the time is unknown
+    on_denied: []                     # finger_id
+    ranges:
+      - slots: "100-119"
+        times:
+          - days: mon-fri             # [mon, wed], mon-fri, daily (default), weekend
+            from: "08:00"             # HH:MM; to < from = over midnight; "24:00" = end of day
+            to: "12:00"
+
   sync:
     key: !secret fingerprint_grow_plus_key   # required: base64 of 32 random bytes
     peers:                            # all nodes (name, name.local, IP, host:port); none = tool only
@@ -398,7 +435,7 @@ fingerprint_grow_plus:
 
 All actions are called as `fingerprint_grow_plus.<action>`.
 Conditions: `fingerprint_grow_plus.is_ready`, `is_syncing`, `is_admin_busy`, `is_admin_slot`,
-`is_locked`, `is_duress_slot`.
+`is_locked`, `is_duress_slot`, `is_allowed`.
 Lambdas: `id(fp_plus).health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
 
 ### Entities (all optional)

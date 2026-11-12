@@ -16,6 +16,7 @@ Assistant, no broker, no cloud). Without `sync:` a node runs stand-alone (no net
 | YAML option / action / condition | `components/fingerprint_grow_plus/__init__.py` (+ setter in `fingerprint_grow_plus.h`) |
 | Admin gestures, protected slots, guests, expiry | `admin.cpp` |
 | Lockout after failed attempts, shared lockout, duress finger | `lockout.cpp` (RAM only) |
+| Time windows for slot ranges (`schedule:`) | `schedule.cpp` |
 | Optional ring LED feedback (`led_feedback:`) | `led_feedback.cpp` (only endless Aura effects: counted ones block the loop) |
 | Sync decisions, jobs, sessions, rounds, backup serving | `fingerprint_grow_plus.cpp` |
 | R503 commands on the UART | `grow_link.*` |

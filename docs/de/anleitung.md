@@ -165,6 +165,34 @@ fingerprint_grow_plus:
   setzt sie zurück.
 - Entitäten: `failed_attempts` (Sensor) und `locked` (Binärsensor).
 
+## Zeitfenster
+
+```yaml
+fingerprint_grow_plus:
+  time_id: sntp_time
+  schedule:
+    without_time: deny         # solange die Uhrzeit unbekannt ist: deny (Standard) oder allow
+    on_denied:                 # finger_id: Finger eines Bereichs außerhalb seiner Zeit erkannt
+      - logger.log: "außerhalb des Zeitfensters"
+    ranges:
+      - slots: "100-119"       # z. B. Reinigungskraft
+        times:
+          - days: [mon, wed]   # oder mon-fri, daily, weekend
+            from: "08:00"
+            to: "12:00"
+      - slots: "120-129"
+        times:
+          - days: fri
+            from: "22:00"      # über Mitternacht: bis Samstag 06:00
+            to: "06:00"
+```
+
+Die Komponente öffnet oder sperrt nichts selbst, sie setzt nur die Bedingung
+`fingerprint_grow_plus.is_allowed: <finger_id>` (wahr, wenn der Slot keinen Zeitplan hat oder
+eines seiner Fenster offen ist). Die gehört in die Tür-Aktion. Slots ohne Zeitplan sind immer
+erlaubt, Admin-Slots dürfen in keinem Zeitplan liegen. Jedes Gerät nutzt seinen eigenen
+`schedule:`-Block: auf allen Geräten eintragen, für die er gelten soll.
+
 ## Sync
 
 ### Einrichten

@@ -27,6 +27,35 @@ SIM = ROOT / "tests" / "sim" / "r503_sim.py"
 KEY = "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="
 WRONG_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
+def _clock(minutes):
+    minutes %= 24 * 60
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def schedule_block():
+    """Slots 40-49: window open now (now +- 2 h); slots 50-59: window closed (now + 3..5 h)."""
+    now = time.localtime()
+    m = now.tm_hour * 60 + now.tm_min
+    return (
+        "\n  schedule:"
+        "\n    on_denied:"
+        "\n      - logger.log:"
+        "\n          format: 'TEST-EVENT denied %u'"
+        "\n          args: [finger_id]"
+        "\n    ranges:"
+        "\n      - slots: '40-49'"
+        f"\n        times: [{{days: daily, from: '{_clock(m - 120)}', to: '{_clock(m + 120)}'}}]"
+        "\n      - slots: '50-59'"
+        f"\n        times: [{{days: daily, from: '{_clock(m + 180)}', to: '{_clock(m + 300)}'}}]"
+        # over midnight (from > to): open except now+60..now+120 -> open now
+        "\n      - slots: '60-69'"
+        f"\n        times: [{{days: daily, from: '{_clock(m + 120)}', to: '{_clock(m + 60)}'}}]"
+        # over midnight: open except now-60..now+60 -> closed now
+        "\n      - slots: '70-79'"
+        f"\n        times: [{{days: daily, from: '{_clock(m + 60)}', to: '{_clock(m - 60)}'}}]"
+    )
+
+
 LOCKOUT = (
     "\n  lockout:"
     "\n    max_attempts: 3"
@@ -76,7 +105,7 @@ SEEDS = {
     "node-c": {"2": {"finger": "dave"}, "150": {"finger": "eve"}},
     "node-d": {"7": {"finger": "mallory"}},
     "node-e": {"9": {"finger": "grace"}},
-    "node-f": {"0": {"finger": "admin"}},
+    "node-f": {"0": {"finger": "admin"}, "45": {"finger": "alma"}, "55": {"finger": "dora"}},
     "node-g": {"1": {"finger": "gina"}},
     "node-h": {},
 }
@@ -210,6 +239,7 @@ interval:
           if (c == "delete") id(fp_plus).delete_slot(a);
           else if (c == "resolve") id(fp_plus).resolve_conflict(a, b != 0);
           else if (c == "sync") id(fp_plus).sync_now();
+          else if (c == "allowed") ESP_LOGD("test", "TEST-EVENT allowed %d %d", a, id(fp_plus).is_allowed(a) ? 1 : 0);
           else if (c == "finger_on") id(finger_detected).publish_state(true);
           else if (c == "finger_off") id(finger_detected).publish_state(false);
           else if (c == "delete_all") id(fp_plus).delete_all("TEST_ALL");
@@ -254,7 +284,8 @@ class Cluster:
                 pty=self.path(name, "pty"),
                 cmd=self.path(name, "cmd"),
                 admin_extra="\n    access: delayed" if cfg.get("standalone") else "",
-                top_extra=("\n  led_feedback:" if cfg.get("standalone") else "") + cfg.get("top_extra", ""),
+                top_extra=("\n  led_feedback:" + schedule_block() if cfg.get("standalone") else "")
+                + cfg.get("top_extra", ""),
                 sync_block=sync_block,
             )
             yaml_path = self.path(name, "yaml")
@@ -687,6 +718,22 @@ def main():
         c.touch("node-f", "admin")
         results.append(wait_until("afterwards a single short touch opens again",
                                   lambda: c.log("node-f").count("TEST-EVENT admin_access") == access_before + 1, 10))
+
+        print("== Scenario 10c: time windows for slot ranges")
+        for slot in (45, 55, 7, 65, 75):
+            c.cmd("node-f", f"allowed {slot}")
+            time.sleep(1)
+        results.append(wait_until("is_allowed: open / closed window, no schedule, windows over midnight",
+                                  lambda: all(f"TEST-EVENT allowed {sl} {v}" in c.log("node-f")
+                                              for sl, v in ((45, 1), (55, 0), (7, 1), (65, 1), (75, 0))), 5))
+        c.touch("node-f", "dora")
+        results.append(wait_until("a finger outside its window fires on_denied",
+                                  lambda: "TEST-EVENT denied 55" in c.log("node-f"), 10))
+        time.sleep(3)
+        c.touch("node-f", "alma")
+        time.sleep(4)
+        results.append(wait_until("a finger inside its window does not",
+                                  lambda: "TEST-EVENT denied 45" not in c.log("node-f"), 1))
 
         print("== Scenario 11: node syncing only the admin slot, local features on all other slots")
         results.append(wait_until("node-g received the admin finger (slot 0) from A",

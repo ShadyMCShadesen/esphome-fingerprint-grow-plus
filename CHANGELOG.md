@@ -15,6 +15,8 @@ versioning: [Semantic Versioning](https://semver.org/).
 - `lockout:` (optional): lock after failed attempts, condition `is_locked`, actions
   `register_failed_attempt` / `reset_lockout`, entities `failed_attempts` / `locked`;
   `share_with` passes a lockout on to selected peers (protocol version 5, message `LOCK`).
+- `schedule:` (optional): time windows for slot ranges (days, from/to, over midnight), condition
+  `is_allowed`, trigger `on_denied`; `without_time: deny | allow` while the time is unknown.
 - `duress:` (optional): a duress finger range that fires `on_duress`; condition `is_duress_slot`.
 - Templates of a different size than this sensor's (other sensor model or firmware) are refused
   with a clear log line, both from peers and on restore.

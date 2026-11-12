@@ -38,6 +38,18 @@ struct Peer {
   uint16_t port;
 };
 
+struct ScheduleWindow {
+  uint8_t days;       // bit 0 = Sunday ... bit 6 = Saturday
+  uint16_t from_min;  // minutes since midnight
+  uint16_t to_min;    // exclusive; < from_min = over midnight
+};
+
+struct Schedule {
+  uint16_t from;
+  uint16_t to;
+  std::vector<ScheduleWindow> windows;
+};
+
 struct SlotRange {
   uint16_t from;
   uint16_t to;
@@ -165,6 +177,11 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   template<typename F> void add_on_locked_callback(F &&cb) { this->locked_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_unlocked_callback(F &&cb) { this->unlocked_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_duress_callback(F &&cb) { this->duress_cb_.add(std::forward<F>(cb)); }
+  // ---- schedule: (schedule.cpp) ----
+  void add_schedule(uint16_t from, uint16_t to);
+  void add_schedule_window(uint8_t days_mask, uint16_t from_min, uint16_t to_min);
+  void set_schedule_allow_without_time(bool allow) { this->schedule_allow_without_time_ = allow; }
+  template<typename F> void add_on_schedule_denied_callback(F &&cb) { this->denied_cb_.add(std::forward<F>(cb)); }
   /// Built-in Aura LED feedback (led_feedback:). `custom_idle`: on_idle restores the user's LED.
   void set_led_feedback(bool custom_idle) {
     this->led_feedback_ = true;
@@ -282,6 +299,8 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   /// Lift a lockout and reset the counter (this node only).
   void reset_lockout();
   bool is_duress_slot(uint16_t slot) const;
+  /// False if the slot has a time window (schedule:) that is closed now; true otherwise.
+  bool is_allowed(uint16_t slot) const;
   /// 0 = in sync, 1 = sync running, 2 = conflicts, 3 = error (sensor or unreachable peer).
   uint8_t health() const;
   static constexpr uint16_t NO_SLOT = 0xFFFF;
@@ -481,6 +500,12 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint16_t duress_from_{0};
   uint16_t duress_to_{0};
   CallbackManager<void(uint16_t, uint16_t)> duress_cb_;
+  // ---- schedule (schedule.cpp) ----
+  static bool window_open_(const ScheduleWindow &w, uint8_t weekday, uint16_t minute);
+  void schedule_matched_(uint16_t finger_id);
+  std::vector<Schedule> schedules_;
+  bool schedule_allow_without_time_{false};
+  CallbackManager<void(uint16_t)> denied_cb_;
   // ---- built-in LED feedback (led_feedback.cpp) ----
   void setup_led_feedback_();
   void led_set_(uint8_t state, uint8_t color, uint32_t idle_after_ms);

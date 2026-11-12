@@ -63,6 +63,7 @@ void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id, uint16_t conf
   const uint32_t now = millis();
   this->last_activity_ms_ = now;
   this->lockout_matched_(finger_id, confidence);
+  this->schedule_matched_(finger_id);
   if (!this->admin_enabled_)
     return;
   const bool admin = this->is_admin_slot(finger_id);

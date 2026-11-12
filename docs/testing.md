@@ -45,7 +45,9 @@ End-to-end scenarios:
     reported, and a restore with a template of a different size is refused.
 14. A node locks after 3 unrecognised fingers and passes the lockout only to the peer in
     `share_with`; both unlock after the duration; a duress finger fires `on_duress`.
-15. `SetPwd` is never sent to any sensor.
+15. Time windows: `is_allowed` for an open window, a closed window, a slot without schedule and
+    windows over midnight; a finger outside its window fires `on_denied`.
+16. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
 `fingerprint_grow` and `fingerprint_grow_plus` with synthetic templates (no real biometric data).

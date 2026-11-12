@@ -90,6 +90,17 @@ CONF_ON_UNLOCKED = "on_unlocked"
 CONF_DURESS = "duress"
 CONF_ON_DURESS = "on_duress"
 
+# schedule:
+CONF_SCHEDULE = "schedule"
+CONF_WITHOUT_TIME = "without_time"
+CONF_ON_DENIED = "on_denied"
+CONF_RANGES = "ranges"
+CONF_TIMES = "times"
+CONF_DAYS = "days"
+CONF_FROM = "from"
+CONF_TO = "to"
+WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+
 # guests:
 CONF_GUESTS = "guests"
 CONF_VALID_FOR = "valid_for"
@@ -291,6 +302,87 @@ DURESS_SCHEMA = cv.maybe_simple_value(
 )
 
 # ---------------------------------------------------------------------------------------
+# schedule:
+# ---------------------------------------------------------------------------------------
+
+
+def validate_days(value):
+    """[mon, wed], "mon-fri", "daily" or "weekend" -> bit mask (bit 0 = Sunday)."""
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value == "daily":
+            return 0x7F
+        if value == "weekend":
+            return 0x41
+        if "-" in value:
+            first, _, last = value.partition("-")
+            if first not in WEEKDAYS or last not in WEEKDAYS:
+                raise cv.Invalid(f"'{value}': use day names like mon-fri")
+            i, j = WEEKDAYS.index(first), WEEKDAYS.index(last)
+            mask = 0
+            while True:
+                mask |= 1 << i
+                if i == j:
+                    return mask
+                i = (i + 1) % 7
+        value = [value]
+    mask = 0
+    for day in cv.ensure_list(cv.string_strict)(value):
+        day = day.strip().lower()[:3]
+        if day not in WEEKDAYS:
+            raise cv.Invalid(f"'{day}' is not a day (mon, tue, wed, thu, fri, sat, sun)")
+        mask |= 1 << WEEKDAYS.index(day)
+    return mask
+
+
+def validate_clock(value):
+    """"HH:MM" -> minutes since midnight ("24:00" allowed as end of day)."""
+    match = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", cv.string_strict(value))
+    if not match:
+        raise cv.Invalid(f"'{value}' is not a time like 08:30")
+    hours, minutes = int(match.group(1)), int(match.group(2))
+    if minutes > 59 or hours > 24 or (hours == 24 and minutes):
+        raise cv.Invalid(f"'{value}' is not a valid time")
+    return hours * 60 + minutes
+
+
+def _validate_window(config):
+    if config[CONF_FROM] == config[CONF_TO]:
+        raise cv.Invalid("from and to must differ (use 00:00 to 24:00 for the whole day)")
+    return config
+
+
+SCHEDULE_SCHEMA = cv.Schema(
+    {
+        # Slots with a time window while the time is not known yet: deny (default) or allow.
+        cv.Optional(CONF_WITHOUT_TIME, default="deny"): cv.one_of("deny", "allow", lower=True),
+        cv.Optional(CONF_ON_DENIED): automation.validate_automation({}),
+        cv.Required(CONF_RANGES): cv.ensure_list(
+            cv.Schema(
+                {
+                    cv.Required(CONF_SLOTS): validate_slot_range,
+                    cv.Required(CONF_TIMES): cv.All(
+                        cv.ensure_list(
+                            cv.All(
+                                cv.Schema(
+                                    {
+                                        cv.Optional(CONF_DAYS, default="daily"): validate_days,
+                                        cv.Required(CONF_FROM): validate_clock,
+                                        cv.Required(CONF_TO): validate_clock,
+                                    }
+                                ),
+                                _validate_window,
+                            )
+                        ),
+                        cv.Length(min=1),
+                    ),
+                }
+            )
+        ),
+    }
+)
+
+# ---------------------------------------------------------------------------------------
 # guests:
 # ---------------------------------------------------------------------------------------
 
@@ -343,6 +435,16 @@ def _validate(config):
                     f"share_with: '{host}' is not in sync: peers (write it as there)",
                     path=[CONF_LOCKOUT, CONF_SHARE_WITH],
                 )
+    if schedule := config.get(CONF_SCHEDULE):
+        if CONF_TIME_ID not in config:
+            raise cv.Invalid("schedule needs time_id", path=[CONF_SCHEDULE])
+        admin_slots = config.get(CONF_ADMIN, {}).get(CONF_SLOTS, [])
+        for rng in schedule[CONF_RANGES]:
+            low, high = rng[CONF_SLOTS]
+            if any(low <= a <= high for a in admin_slots):
+                raise cv.Invalid(
+                    "admin slots must not be inside a schedule range", path=[CONF_SCHEDULE]
+                )
     if duress := config.get(CONF_DURESS):
         low, high = duress[CONF_SLOTS]
         admin_slots = config.get(CONF_ADMIN, {}).get(CONF_SLOTS, [])
@@ -387,6 +489,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_LED_FEEDBACK): LED_FEEDBACK_SCHEMA,
             cv.Optional(CONF_LOCKOUT): LOCKOUT_SCHEMA,
             cv.Optional(CONF_DURESS): DURESS_SCHEMA,
+            cv.Optional(CONF_SCHEDULE): SCHEDULE_SCHEMA,
             cv.Optional(CONF_SYNC): SYNC_SCHEMA,
             cv.Optional(CONF_ON_SLOT_UPDATED): automation.validate_automation({}),
             cv.Optional(CONF_ON_SLOT_DELETED): automation.validate_automation({}),
@@ -560,6 +663,23 @@ async def to_code(config):
             ),
         )
 
+    if schedule := config.get(CONF_SCHEDULE):
+        cg.add(var.set_schedule_allow_without_time(schedule[CONF_WITHOUT_TIME] == "allow"))
+        for rng in schedule[CONF_RANGES]:
+            low, high = rng[CONF_SLOTS]
+            cg.add(var.add_schedule(low, high))
+            for win in rng[CONF_TIMES]:
+                cg.add(var.add_schedule_window(win[CONF_DAYS], win[CONF_FROM], win[CONF_TO]))
+        await automation.build_callback_automations(
+            var,
+            schedule,
+            (
+                automation.CallbackAutomation(
+                    CONF_ON_DENIED, "add_on_schedule_denied_callback", [(cg.uint16, "finger_id")]
+                ),
+            ),
+        )
+
     if CONF_LED_FEEDBACK in config:
         led = config[CONF_LED_FEEDBACK]
         cg.add(var.set_led_feedback(CONF_ON_IDLE in led))
@@ -727,6 +847,11 @@ automation.register_apply_condition(
 )
 automation.register_apply_condition(
     "fingerprint_grow_plus.is_locked", _PARENT_SCHEMA, "is_locked()"
+)
+automation.register_apply_condition(
+    "fingerprint_grow_plus.is_allowed",
+    cv.maybe_simple_value({_PARENT: _PARENT_ID, cv.Required(CONF_SLOT): _SLOT}, key=CONF_SLOT),
+    automation.ApplyCall("is_allowed({})", ((CONF_SLOT, cg.uint16),)),
 )
 automation.register_apply_condition(
     "fingerprint_grow_plus.is_duress_slot",
