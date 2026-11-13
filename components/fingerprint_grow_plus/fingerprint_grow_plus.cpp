@@ -59,6 +59,7 @@ void FingerprintGrowPlusComponent::setup() {
   this->grow_->add_on_finger_scan_start_callback(activity);
   this->grow_->add_on_finger_scan_unmatched_callback([this]() {
     this->last_activity_ms_ = millis();
+    this->access_record_(NO_SLOT, 0, ACCESS_UNKNOWN, 0);
     if (this->lockout_enabled_)
       this->register_failed_attempt();
   });
@@ -131,6 +132,8 @@ void FingerprintGrowPlusComponent::dump_config() {
     ESP_LOGCONFIG(TAG, "  Guests: slots %u-%u, default validity %" PRIu32 " h%s", this->guest_from_, this->guest_to_,
                   this->guest_valid_s_ / 3600,
                   this->backend_ == MetaBackend::NOTEPAD ? " (expiry not persisted with the notepad)" : "");
+  if (this->access_size_ > 0)
+    ESP_LOGCONFIG(TAG, "  Access log: last %u scans (RAM only)", this->access_size_);
   if (!this->network_) {
     ESP_LOGCONFIG(TAG, "  Sync: off (no sync: block), local features only");
     return;
@@ -1615,6 +1618,13 @@ void FingerprintGrowPlusComponent::handle_message_(Session &s, const std::vector
       this->handle_remote_lock_(s, seconds);
       break;
     }
+    case MSG_ACCESS_LOG_REQ:
+      if (s.is_client) {
+        this->end_session_(s, false, "access log requested by a server");
+        return;
+      }
+      this->send_access_log_(s);
+      break;
     case MSG_LOCAL_LIST_REQ:
       if (s.local_ok) {
         this->end_session_(s, false, "local slot list requested twice");

@@ -88,6 +88,29 @@ struct SlotExtra {
   std::string name;     // optional slot name, up to MAX_NAME_LEN bytes
 };
 
+/// One entry of the access log (access_log:, RAM only).
+enum AccessResult : uint8_t {
+  ACCESS_MATCHED = 0,           // a stored finger was recognised
+  ACCESS_UNKNOWN = 1,           // a finger was scanned but not recognised
+  ACCESS_OUTSIDE_SCHEDULE = 2,  // recognised outside its time window (schedule:)
+  ACCESS_WHILE_LOCKED = 3,      // recognised while the node was locked (lockout:)
+  ACCESS_DURESS = 4,            // a duress finger (duress:)
+};
+enum AccessFlag : uint8_t {
+  ACCESS_FLAG_ADMIN = 1 << 0,   // an admin finger
+  ACCESS_FLAG_GUEST = 1 << 1,   // a guest finger
+  ACCESS_FLAG_TARGET = 1 << 2,  // shown as the target of an admin action (delete / re-enroll)
+};
+struct AccessEntry {
+  uint32_t time{0};      // unix time, 0 = clock not set
+  uint32_t stamp_ms{0};  // millis() at the scan
+  uint16_t slot{0xFFFF};
+  uint16_t confidence{0};
+  uint8_t result{ACCESS_MATCHED};
+  uint8_t flags{0};
+  std::string name;  // slot name at the time of the scan
+};
+
 struct Job {
   JobType type;
   uint16_t slot{0};
@@ -191,6 +214,16 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   template<typename F> void add_on_locked_callback(F &&cb) { this->locked_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_unlocked_callback(F &&cb) { this->unlocked_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_duress_callback(F &&cb) { this->duress_cb_.add(std::forward<F>(cb)); }
+  // ---- access_log: (access_log.cpp) ----
+  /// Keep the last `size` scans in RAM (0 = off).
+  void set_access_log_size(uint16_t size) { this->access_size_ = size; }
+  template<typename F> void add_on_access_entry_callback(F &&cb) { this->access_cb_.add(std::forward<F>(cb)); }
+  /// The access log, oldest entry first.
+  std::vector<AccessEntry> access_log() const;
+  void clear_access_log();
+  /// Write the access log to the ESPHome log (INFO).
+  void dump_access_log();
+  static const char *access_result_name(uint8_t result);
   // ---- duplicate_check: (duplicate.cpp) ----
   /// 0 = off, 1 = warn, 2 = refuse
   void set_duplicate_check(uint8_t mode) { this->duplicate_mode_ = mode; }
@@ -242,6 +275,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   void set_occupied_text_sensor(text_sensor::TextSensor *s) { this->occupied_text_sensor_ = s; }
   void set_unreachable_text_sensor(text_sensor::TextSensor *s) { this->unreachable_text_sensor_ = s; }
   void set_last_name_text_sensor(text_sensor::TextSensor *s) { this->last_name_text_sensor_ = s; }
+  void set_last_access_text_sensor(text_sensor::TextSensor *s) { this->last_access_text_sensor_ = s; }
 #endif
 #ifdef USE_BINARY_SENSOR
   void set_syncing_binary_sensor(binary_sensor::BinarySensor *s) { this->syncing_binary_sensor_ = s; }
@@ -483,6 +517,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   text_sensor::TextSensor *occupied_text_sensor_{nullptr};
   text_sensor::TextSensor *unreachable_text_sensor_{nullptr};
   text_sensor::TextSensor *last_name_text_sensor_{nullptr};
+  text_sensor::TextSensor *last_access_text_sensor_{nullptr};
   uint32_t last_occupied_ms_{0};
   void publish_occupied_();
 #endif
@@ -550,6 +585,14 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint16_t duress_from_{0};
   uint16_t duress_to_{0};
   CallbackManager<void(uint16_t, uint16_t)> duress_cb_;
+  // ---- access log (access_log.cpp) ----
+  void access_record_(uint16_t slot, uint16_t confidence, uint8_t result, uint8_t flags);
+  uint8_t access_result_of_(uint16_t slot) const;
+  void send_access_log_(Session &s);
+  uint16_t access_size_{0};
+  size_t access_next_{0};  // ring position of the next entry
+  std::vector<AccessEntry> access_;
+  CallbackManager<void(uint16_t, std::string, std::string)> access_cb_;
   // ---- duplicate check (duplicate.cpp) ----
   void setup_duplicate_check_();
   void duplicate_loop_();

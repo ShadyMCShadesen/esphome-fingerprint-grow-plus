@@ -17,6 +17,7 @@ Assistant, no broker, no cloud). Without `sync:` a node runs stand-alone (no net
 | Admin gestures, protected slots, guests, expiry | `admin.cpp` |
 | Lockout after failed attempts, shared lockout, duress finger | `lockout.cpp` (RAM only) |
 | Time windows for slot ranges (`schedule:`) | `schedule.cpp` |
+| Access log (`access_log:`, `last_access`, tool `log`) | `access_log.cpp` (RAM ring buffer, never to peers) |
 | Duplicate check while enrolling (`duplicate_check:`) | `duplicate.cpp` (Search on the first scan's buffer) |
 | Optional ring LED feedback (`led_feedback:`) | `led_feedback.cpp` (only endless Aura effects: counted ones block the loop) |
 | Sync decisions, jobs, sessions, rounds, backup serving | `fingerprint_grow_plus.cpp` |

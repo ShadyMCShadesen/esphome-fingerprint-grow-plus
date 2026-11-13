@@ -62,6 +62,17 @@ uint8_t FingerprintGrowPlusComponent::health() const {
 void FingerprintGrowPlusComponent::on_matched_(uint16_t finger_id, uint16_t confidence) {
   const uint32_t now = millis();
   this->last_activity_ms_ = now;
+  {
+    // Recorded first: guest_used_ may delete the slot (and its name) on the last use.
+    uint8_t flags = 0;
+    if (this->is_admin_slot(finger_id))
+      flags |= ACCESS_FLAG_ADMIN;
+    else if (this->armed_ != AdminArm::NONE)
+      flags |= ACCESS_FLAG_TARGET;
+    if (this->in_guest_range_(finger_id))
+      flags |= ACCESS_FLAG_GUEST;
+    this->access_record_(finger_id, confidence, this->access_result_of_(finger_id), flags);
+  }
   this->lockout_matched_(finger_id, confidence);
   this->schedule_matched_(finger_id);
   this->guest_used_(finger_id);

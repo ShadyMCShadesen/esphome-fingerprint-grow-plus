@@ -181,6 +181,40 @@ löst `on_duplicate` aus; mit `refuse` wird das Einlernen abgebrochen (`on_enrol
 Finger erneut in seinen eigenen Slot einzulernen ist kein Duplikat. Die Suche verlängert den ersten
 Scan um bis zu etwa 1 s.
 
+## Zugriffsprotokoll
+
+```yaml
+fingerprint_grow_plus:
+  access_log:
+    size: 50                   # letzte Scans im RAM (1-500, je etwa 40 Byte)
+    on_entry:                  # finger_id (65535 = unbekannter Finger), result, name
+      - homeassistant.event:
+          event: esphome.fingerprint_access
+          data:
+            slot: !lambda "return to_string(finger_id);"
+            result: !lambda "return result;"
+            name: !lambda "return name;"
+```
+
+Jeder Scan wird mit Zeit, Slot, Name und Ergebnis protokolliert: `matched` (erkannt), `unknown`
+(nicht erkannt), `outside_schedule` (außerhalb des Zeitfensters), `while_locked` (während einer
+Sperre) oder `duress` (Notfall-Finger). Das Ergebnis sagt, was der Sensor gesehen hat, nicht ob die
+Tür aufging; das entscheidet deine eigene Automation. Admin-Finger, Gäste und Finger, die als Ziel
+einer Admin-Aktion gezeigt wurden, sind markiert.
+
+Das Protokoll liegt nur im RAM (weg nach einem Neustart, nie im Flash, nie an andere Geräte
+gesendet). Auslesen:
+- **Tool:** `python3 tools/growplus.py log --host geraet-1.local --host 192.168.10.23 --key '<Schlüssel>'`
+  führt die Protokolle mehrerer Geräte nach Zeit sortiert zusammen (`--csv` für eine Tabelle).
+  Braucht wie das Backup einen `sync:`-Block (Schlüssel). Ein `~` vor der Zeit heißt: Die Uhr des
+  Geräts war nicht gestellt, die Zeit ist aus der Laufzeit geschätzt.
+- **Home Assistant:** `on_entry` (z. B. als Event wie oben) oder der Text-Sensor `last_access`
+  (`Anna (#5): matched`). HA führt dabei seine eigene Historie, ohne Größenbegrenzung.
+- **Geräte-Log:** `fingerprint_grow_plus.dump_access_log`; `clear_access_log` leert das Protokoll.
+
+`last_access` funktioniert auch ohne `access_log:`. HA speichert einen Zustand nur, wenn er sich
+ändert: Dieselbe Person zweimal hintereinander ist dort ein Eintrag; `on_entry` löst jedes Mal aus.
+
 ## Sperre nach Fehlversuchen und Notfall-Finger
 
 ```yaml
@@ -373,6 +407,9 @@ py tools\growplus.py restore --host 192.168.10.21 --port 18530 --key '<Schlüsse
   das Tool und synchronisiert mit niemandem.
 
 Backup-Dateien enthalten biometrische Daten: nie in ein Repository legen.
+
+Dasselbe Tool liest auch Zugriffsprotokolle: `growplus.py log --host H1 --host H2:18531 --key '<Schlüssel>'`
+(siehe [Zugriffsprotokoll](#zugriffsprotokoll)).
 
 ## Entitäten
 

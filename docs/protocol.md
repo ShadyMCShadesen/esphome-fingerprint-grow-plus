@@ -1,4 +1,4 @@
-# Sync protocol (version 6)
+# Sync protocol (version 7)
 
 All integers are big endian. Transport: one TCP connection per session, default port 18530.
 
@@ -52,6 +52,8 @@ tampered record aborts the session.
 | 0x08 | LOCAL_LIST_REQ | no payload; asks for the local-only slots (backup tool only) |
 | 0x09 | LOCAL_LIST | `u8 page, u8 flags (bit0 last page, bit1 refused), u16 count, count × (u16 slot, Extra)`; 48 entries per page |
 | 0x0A | LOCK | `u32 seconds`: lock this node for that long (`lockout: share_with`); only sent by the client of a session, never forwarded |
+| 0x0B | ACCESS_LOG_REQ | no payload; asks for the access log (backup tool only; answered only by the server side) |
+| 0x0C | ACCESS_LOG | `u8 page, u8 flags (bit0 last page, bit1 no access log configured), u16 count, count × (u32 time, u32 age_s, u16 slot, u16 confidence, u8 result, u8 flags, u8 name_len, name)`; 48 entries per page |
 
 - `meta = state << 14 | version` with state 0 none, 1 present, 2 present-forced, 3 tombstone.
 - `hash` = first 8 bytes of SHA-256(template). Zero for tombstones.
@@ -63,7 +65,12 @@ tampered record aborts the session.
 slot version: a node adopting a version adopts them.
 
 Version history: 4 = 0.2.0 (first published version; 1-3 were development versions); 5 = `LOCK`;
-6 = `Extra` (names, guest uses) and the manifest epoch.
+6 = `Extra` (names, guest uses) and the manifest epoch; 7 = `ACCESS_LOG_REQ` / `ACCESS_LOG`.
+
+**Access log.** `time` is unix time (0 = clock not set), `age_s` the seconds since the scan
+(node uptime, for entries without time). `slot` 0xFFFF = unknown finger. `result`: 0 matched,
+1 unknown, 2 outside schedule, 3 while locked, 4 duress. `flags`: bit0 admin finger, bit1 guest,
+bit2 target of an admin action. The log is never sent to peers on its own.
 
 **Full backup.** A node answers `LOCAL_LIST_REQ` only while a full-backup window is open
 (`allow_full_backup`), otherwise with the refused flag. After a granted list, `TEMPLATE_REQ` of this

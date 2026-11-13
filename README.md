@@ -223,6 +223,38 @@ slot, `on_duplicate` fires; with `refuse` the enrollment is cancelled (`on_enrol
 Enrolling a finger again into its own slot is not a duplicate. The search adds up to about
 1 s to the first scan.
 
+## Access log
+
+```yaml
+fingerprint_grow_plus:
+  access_log:
+    size: 50                   # last scans kept in RAM (1-500, about 40 bytes each)
+    on_entry:                  # finger_id (65535 = unknown finger), result, name
+      - homeassistant.event:
+          event: esphome.fingerprint_access
+          data:
+            slot: !lambda "return to_string(finger_id);"
+            result: !lambda "return result;"
+            name: !lambda "return name;"
+```
+
+Every scan is logged with time, slot, name and result: `matched`, `unknown` (finger not
+recognised), `outside_schedule` (`schedule:`), `while_locked` (`lockout:`) or `duress`. The result
+says what the sensor saw, not whether the door opened: that is up to your own automation. Admin
+fingers, guests and fingers shown as the target of an admin action are marked.
+
+The log lives only in RAM (lost on reboot, never written to flash, never sent to peers). Read it:
+- **Tool:** `python3 tools/growplus.py log --host reader-garden.local --host 192.168.10.23 --key '<key>'`
+  merges the logs of several nodes, sorted by time (`--csv` for a spreadsheet). Needs a `sync:`
+  block (key) like backups. A `~` in front of the time means the node's clock was not set; the
+  time is then estimated from its uptime.
+- **Home Assistant:** `on_entry` (e.g. as an event, above) or the text sensor `last_access`
+  (`Anna (#5): matched`). HA keeps its own history of both.
+- **Device log:** `fingerprint_grow_plus.dump_access_log`; `clear_access_log` empties it.
+
+The text sensor `last_access` also works without `access_log:`. Note that HA records a state only
+when it changes: the same person twice in a row is one entry there; `on_entry` fires every time.
+
 ## Lockout and duress finger
 
 ```yaml
@@ -350,6 +382,9 @@ py tools\growplus.py inspect --key '<key>' --in reader-garden.fgpb
 py tools\growplus.py restore --host 192.168.10.21 --port 18530 --key '<key>' --in reader-garden.fgpb
 ```
 
+The same tool reads access logs: `growplus.py log --host H1 --host H2:18531 --key '<key>'`
+(see [Access log](#access-log)).
+
 - `--host`: IP address or DNS name of the node (`.local` works where your PC resolves mDNS);
   `--port` only if the node does not use 18530.
 - `--key`: instead of the key on the command line you can use `--key-file <file>` or the
@@ -427,6 +462,10 @@ fingerprint_grow_plus:
     mode: refuse                      # warn | refuse
     on_duplicate: []                  # finger_id (stored), slot (being enrolled)
 
+  access_log:
+    size: 50                          # last scans in RAM (1-500); or just access_log: 50
+    on_entry: []                      # finger_id (65535 = unknown), result, name
+
   schedule:                           # needs time_id
     without_time: deny                # deny | allow while the time is unknown
     on_denied: []                     # finger_id
@@ -482,11 +521,13 @@ fingerprint_grow_plus:
 | `allow_full_backup` | `duration` (5min) | let `tools/growplus.py backup --include-local` read the slots that are not synced |
 | `register_failed_attempt` | – | count a failed attempt for `lockout:` (unmatched scans count by themselves) |
 | `reset_lockout` | – | lift a lockout and reset the counter on this node |
+| `dump_access_log` | – | write the access log to the device log |
+| `clear_access_log` | – | empty the access log |
 
 All actions are called as `fingerprint_grow_plus.<action>`.
 Conditions: `fingerprint_grow_plus.is_ready`, `is_syncing`, `is_admin_busy`, `is_admin_slot`,
 `is_locked`, `is_duress_slot`, `is_allowed`.
-Lambdas: `id(fp_plus).slot_name(slot)`, `slot_uses_left(slot)`, `health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
+Lambdas: `id(fp_plus).access_log()` (entries, oldest first), `id(fp_plus).slot_name(slot)`, `slot_uses_left(slot)`, `health()`, `next_free_slot()`, `slot_expiry(slot)`, `conflict_count()`.
 
 ### Entities (all optional)
 
@@ -495,8 +536,9 @@ text_sensor:
   - platform: fingerprint_grow_plus
     occupied_slots: {name: Occupied slots}   # e.g. "0, 2-5, 17, 150-151"
     status: {name: Sync status}
-    unreachable_peers: {name: Unreachable peers}
-    last_name: {name: Last recognised}       # name of the last recognised finger   # "-" or "reader-garage.local (not reachable)"
+    unreachable_peers: {name: Unreachable peers}   # "-" or "reader-garage.local (not reachable)"
+    last_name: {name: Last recognised}       # name of the last recognised finger
+    last_access: {name: Last access}         # e.g. "Anna (#5): matched", "unknown finger"
 sensor:
   - platform: fingerprint_grow_plus
     peers_reachable: {name: Sync peers reachable}

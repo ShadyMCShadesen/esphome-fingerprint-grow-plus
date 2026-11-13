@@ -13,6 +13,8 @@ Commands
                                            synced (run allow_full_backup on the node first)
   restore --host H --in FILE [--slots ..]  upload templates (node must run allow_restore first)
   inspect --in FILE                        list the content of a backup file
+  log     --host H [--host H2:PORT ...]    access log of one or more nodes (access_log:),
+          [--csv]                          merged and sorted by time
 
 The key is read from --key, from --key-file or from the environment variable GROWPLUS_KEY.
 Backup files are encrypted and authenticated with a key derived from the shared key.
@@ -31,11 +33,13 @@ import sys
 import time
 
 DEFAULT_PORT = 18530
-MAGIC = b"FGP\x06"  # last byte = protocol version
+MAGIC = b"FGP\x07"  # last byte = protocol version
 TAG_SIZE = 16
 MAX_RECORD_BODY = 2560
 (MSG_MANIFEST, MSG_TEMPLATE_REQ, MSG_TEMPLATE, MSG_TEMPLATE_NAK, MSG_DONE, MSG_RESTORE, MSG_RESTORE_ACK,
- MSG_LOCAL_LIST_REQ, MSG_LOCAL_LIST) = range(1, 10)
+ MSG_LOCAL_LIST_REQ, MSG_LOCAL_LIST, MSG_LOCK, MSG_ACCESS_LOG_REQ, MSG_ACCESS_LOG) = range(1, 13)
+ACCESS_RESULTS = ["matched", "unknown", "outside_schedule", "while_locked", "duress"]
+ACCESS_FLAGS = [(1, "admin"), (2, "guest"), (4, "admin-target")]
 STATE_NAMES = {0: "none", 1: "present", 2: "present (forced)", 3: "deleted"}
 
 
@@ -243,6 +247,31 @@ def read_local_list(ch: Channel):
             return entries
 
 
+def read_access_log(ch: Channel):
+    """The node's access log, oldest first; None if the node has no access_log: block."""
+    ch.send(bytes([MSG_ACCESS_LOG_REQ]))
+    received = time.time()
+    entries = []
+    while True:
+        msg = ch.recv()
+        if msg[0] != MSG_ACCESS_LOG:
+            continue  # e.g. DONE from the node
+        flags = msg[2]
+        if flags & 2:
+            return None
+        count = struct.unpack(">H", msg[3:5])[0]
+        pos = 5
+        for _ in range(count):
+            unix, age, slot, confidence, result, eflags, name_len = struct.unpack(">IIHHBBB", msg[pos : pos + 15])
+            name = msg[pos + 15 : pos + 15 + name_len].decode("utf-8", "replace")
+            pos += 15 + name_len
+            entries.append({"time": unix or int(received - age), "clock": bool(unix), "slot": slot,
+                            "confidence": confidence, "name": name, "flags": eflags,
+                            "result": ACCESS_RESULTS[result] if result < len(ACCESS_RESULTS) else str(result)})
+        if flags & 1:
+            return entries
+
+
 def fetch_template(ch: Channel, slot: int):
     """Returns (meta, extra, data) or None if the node could not read the slot."""
     ch.send(bytes([MSG_TEMPLATE_REQ]) + struct.pack(">H", slot))
@@ -416,6 +445,43 @@ def cmd_restore(args):
     print(f"{ok} template(s) restored; synced slots are propagated to the peers, local-only slots stay on the node")
 
 
+def cmd_log(args):
+    key = load_key(args)
+    rows = []
+    for spec in args.host:
+        host, _, port = spec.partition(":")
+        node_args = argparse.Namespace(host=host, port=int(port) if port else args.port, timeout=args.timeout)
+        try:
+            ch = connect(node_args, key)
+            read_manifest(ch)
+            entries = read_access_log(ch)
+            finish(ch)
+        except (OSError, ConnectionError) as err:
+            print(f"{spec}: not reachable ({err})", file=sys.stderr)
+            continue
+        if entries is None:
+            print(f"{spec}: no access log (access_log: is not configured on this node)", file=sys.stderr)
+            continue
+        rows += [dict(e, node=spec) for e in entries]
+    rows.sort(key=lambda e: e["time"])
+    if args.csv:
+        print("time,node,slot,name,result,confidence,flags")
+    for e in rows:
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(e["time"]))
+        flags = " ".join(n for bit, n in ACCESS_FLAGS if e["flags"] & bit)
+        slot = "" if e["slot"] == 0xFFFF else str(e["slot"])
+        if args.csv:
+            name = e["name"].replace('"', '""')
+            print(f'{when},{e["node"]},{slot},"{name}",{e["result"]},{e["confidence"]},{flags}')
+            continue
+        who = "unknown finger" if not slot else f"slot {slot:>4}" + (f"  {e['name']}" if e["name"] else "")
+        approx = "" if e["clock"] else "~"  # node clock was not set: time estimated from its uptime
+        print(f"{approx}{when}  {e['node']:<22} {who:<32} {e['result']}"
+              + (f" ({flags})" if flags else ""))
+    if not args.csv:
+        print(f"{len(rows)} entr{'y' if len(rows) == 1 else 'ies'}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -444,6 +510,15 @@ def main():
     p.add_argument("--in", dest="input", required=True)
     p.add_argument("--slots", help="e.g. 0,2,10-19 (default: all in the file)")
     p.set_defaults(func=cmd_restore)
+    p = sub.add_parser("log")
+    p.add_argument("--key")
+    p.add_argument("--key-file")
+    p.add_argument("--host", action="append", required=True,
+                   help="node as host or host:port; repeat for a merged log of several nodes")
+    p.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p.add_argument("--timeout", type=float, default=30)
+    p.add_argument("--csv", action="store_true", help="comma-separated output")
+    p.set_defaults(func=cmd_log)
     p = sub.add_parser("inspect")
     common(p, needs_host=False)
     p.add_argument("--in", dest="input", required=True)

@@ -15,6 +15,10 @@ versioning: [Semantic Versioning](https://semver.org/).
 - `lockout:` (optional): lock after failed attempts, condition `is_locked`, actions
   `register_failed_attempt` / `reset_lockout`, entities `failed_attempts` / `locked`;
   `share_with` passes a lockout on to selected peers (protocol version 5, message `LOCK`).
+- `access_log:` (optional): the last scans in RAM with time, slot, name and result (matched,
+  unknown, outside schedule, while locked, duress); `on_entry` trigger, text sensor
+  `last_access`, actions `dump_access_log` / `clear_access_log`, `growplus.py log` merges the logs
+  of several nodes (protocol version 7, `ACCESS_LOG_REQ` / `ACCESS_LOG`).
 - `duplicate_check:` (optional, `warn` | `refuse`): at the first enrollment scan the fresh image
   is searched in the library; a finger already stored in another slot fires `on_duplicate` and,
   with `refuse`, cancels the enrollment.

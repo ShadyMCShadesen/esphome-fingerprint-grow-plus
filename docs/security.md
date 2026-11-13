@@ -53,6 +53,9 @@ Fingerprint templates are biometric data. They cannot be changed like a password
   can be reverse engineered into a usable fake finger is unknown; treat them as sensitive.
 - **Backups** made with `tools/growplus.py` are encrypted with a key derived from the PSK. Anyone
   holding the backup file *and* the PSK can read the templates.
+- **Access log** (`access_log:`): who came when is personal data. It stays in RAM, is never sent
+  to peers and is only handed to a client holding the PSK (`tools/growplus.py log`). What you
+  forward to Home Assistant (`on_entry`, `last_access`) is kept there under HA's own rules.
 - **ESP8266:** the PSK sits in flash without hardware protection.
 - **Sensor UART.** The cable between ESP and sensor is not protected; neither is it in a setup
   without this component.

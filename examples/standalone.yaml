@@ -70,4 +70,14 @@ fingerprint_grow_plus:
   admin:
   # Guest fingers in slots 150-179, valid 7 days.
   guests: "150-179"
+  # The last 50 scans in RAM; each one also as an event in Home Assistant.
+  access_log:
+    size: 50
+    on_entry:
+      - homeassistant.event:
+          event: esphome.fingerprint_access
+          data:
+            slot: !lambda "return to_string(finger_id);"
+            result: !lambda "return result;"
+            name: !lambda "return name;"
   # No sync: block: nothing leaves this node, no network port is opened.

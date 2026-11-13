@@ -26,6 +26,7 @@ fingerprint_grow_plus:
   lockout:
   duress: "190-199"
   duplicate_check: refuse
+  access_log: 10
   schedule:
     ranges:
       - slots: "100-109"

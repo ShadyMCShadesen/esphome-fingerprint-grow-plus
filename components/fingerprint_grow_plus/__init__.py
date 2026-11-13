@@ -108,6 +108,11 @@ CONF_MODE = "mode"
 CONF_ON_DUPLICATE = "on_duplicate"
 DUPLICATE_MODES = {"warn": 1, "refuse": 2}
 
+# access_log:
+CONF_ACCESS_LOG = "access_log"
+CONF_SIZE = "size"
+CONF_ON_ENTRY = "on_entry"
+
 # guests:
 CONF_GUESTS = "guests"
 CONF_VALID_FOR = "valid_for"
@@ -406,6 +411,19 @@ DUPLICATE_SCHEMA = cv.maybe_simple_value(
 )
 
 # ---------------------------------------------------------------------------------------
+# access_log:
+# ---------------------------------------------------------------------------------------
+
+ACCESS_LOG_SCHEMA = cv.maybe_simple_value(
+    {
+        # Entries kept in RAM (oldest dropped first); about 40 bytes each
+        cv.Optional(CONF_SIZE, default=50): cv.int_range(min=1, max=500),
+        cv.Optional(CONF_ON_ENTRY): automation.validate_automation({}),
+    },
+    key=CONF_SIZE,
+)
+
+# ---------------------------------------------------------------------------------------
 # guests:
 # ---------------------------------------------------------------------------------------
 
@@ -516,6 +534,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_DURESS): DURESS_SCHEMA,
             cv.Optional(CONF_SCHEDULE): SCHEDULE_SCHEMA,
             cv.Optional(CONF_DUPLICATE_CHECK): DUPLICATE_SCHEMA,
+            cv.Optional(CONF_ACCESS_LOG): ACCESS_LOG_SCHEMA,
             cv.Optional(CONF_SYNC): SYNC_SCHEMA,
             cv.Optional(CONF_ON_SLOT_UPDATED): automation.validate_automation({}),
             cv.Optional(CONF_ON_SLOT_DELETED): automation.validate_automation({}),
@@ -721,6 +740,20 @@ async def to_code(config):
             ),
         )
 
+    if alog := config.get(CONF_ACCESS_LOG):
+        cg.add(var.set_access_log_size(alog[CONF_SIZE]))
+        await automation.build_callback_automations(
+            var,
+            alog,
+            (
+                automation.CallbackAutomation(
+                    CONF_ON_ENTRY,
+                    "add_on_access_entry_callback",
+                    [(cg.uint16, "finger_id"), (cg.std_string, "result"), (cg.std_string, "name")],
+                ),
+            ),
+        )
+
     if CONF_LED_FEEDBACK in config:
         led = config[CONF_LED_FEEDBACK]
         cg.add(var.set_led_feedback(CONF_ON_IDLE in led))
@@ -855,6 +888,11 @@ _action(
 
 _simple("register_failed_attempt", "register_failed_attempt()")
 _simple("reset_lockout", "reset_lockout()")
+
+# --- access log ------------------------------------------------------------------------
+
+_simple("clear_access_log", "clear_access_log()")
+_simple("dump_access_log", "dump_access_log()")
 
 # --- sync ------------------------------------------------------------------------------
 

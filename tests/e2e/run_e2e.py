@@ -87,6 +87,15 @@ DURESS = (
     "\n          args: [finger_id]"
 )
 
+ACCESS_LOG = (
+    "\n  access_log:"
+    "\n    size: 20"
+    "\n    on_entry:"
+    "\n      - logger.log:"
+    "\n          format: 'TEST-EVENT access %u %s'"
+    "\n          args: [finger_id, result.c_str()]"
+)
+
 NODES = {
     "node-a": {"port": 18531, "peers": ["node-b", "node-c", "node-d"], "include": ["0-199"], "exclude": []},
     # node-b locks after 3 unrecognised fingers and passes the lockout on to node-c only
@@ -94,7 +103,7 @@ NODES = {
                "top_extra": LOCKOUT.format(share="127.0.0.1:18533")},
     # node-c keeps 150-199 for itself (node-exclusive range)
     "node-c": {"port": 18533, "peers": ["node-a", "node-b"], "include": ["0-199"], "exclude": ["150-199"],
-               "top_extra": LOCKOUT.format(share="") + DURESS},
+               "top_extra": LOCKOUT.format(share="") + DURESS + ACCESS_LOG},
     # node-d has the wrong key and must be rejected
     "node-d": {"port": 18534, "peers": ["node-a"], "include": ["0-199"], "exclude": [], "key": WRONG_KEY},
     # node-e runs in dry-run mode: it must log what it would do and change nothing
@@ -191,6 +200,8 @@ text_sensor:
       name: Unreachable peers
     last_name:
       name: Last name
+    last_access:
+      name: Last access
 fingerprint_grow_plus:
   id: fp_plus
   startup_delay: 2s
@@ -263,6 +274,7 @@ interval:
           else if (c == "allowed") ESP_LOGD("test", "TEST-EVENT allowed %d %d", a, id(fp_plus).is_allowed(a) ? 1 : 0);
           else if (c == "finger_on") id(finger_detected).publish_state(true);
           else if (c == "finger_off") id(finger_detected).publish_state(false);
+          else if (c == "dump_access") id(fp_plus).dump_access_log();
           else if (c == "delete_all") id(fp_plus).delete_all("TEST_ALL");
           else if (c == "delete_all_wrong") id(fp_plus).delete_all("nope");
           else if (c == "allow_restore") id(fp_plus).allow_restore(120);
@@ -945,11 +957,40 @@ def main():
                                   lambda: "TEST-EVENT locked remote" in c.log("node-c"), 30))
         results.append(wait_until("... but not A (not in share_with)",
                                   lambda: "Locked for" not in c.log("node-a") and "requested a lockout" not in c.log("node-a"), 1))
+        # Access log on C (access_log:): a known finger while locked, a stranger, the duress finger
+        # and the known finger again after the lockout.
+        known_slot, known = min((s, f) for s, f in c.slots("node-c").items() if 0 < s < 150 and s != 9)
+        c.touch("node-c", known)
+        time.sleep(2.5)
+        c.touch("node-c", "stranger-c")
+        time.sleep(2.5)
+        results.append(wait_until("access log: known finger while locked, then an unknown finger",
+                                  lambda: f"TEST-EVENT access {known_slot} while_locked" in c.log("node-c")
+                                  and "TEST-EVENT access 65535 unknown" in c.log("node-c"), 15))
         results.append(wait_until("both unlock again after the duration",
                                   lambda: "TEST-EVENT unlocked" in c.log("node-b") and "TEST-EVENT unlocked" in c.log("node-c"), 60))
         c.touch("node-c", "eve")  # slot 150 on C is in the duress range
         results.append(wait_until("the duress finger fires on_duress",
-                                  lambda: "TEST-EVENT duress 150" in c.log("node-c"), 15))
+                                  lambda: "TEST-EVENT duress 150" in c.log("node-c")
+                                  and "TEST-EVENT access 150 duress" in c.log("node-c"), 15))
+        time.sleep(2.5)
+        c.touch("node-c", known)
+        results.append(wait_until("after the lockout the known finger is logged as matched",
+                                  lambda: f"TEST-EVENT access {known_slot} matched" in c.log("node-c"), 15))
+        time.sleep(2)
+        res = subprocess.run(tool + ["log", "--host", f"127.0.0.1:{NODES['node-c']['port']}",
+                                     "--host", f"127.0.0.1:{NODES['node-b']['port']}"],
+                             capture_output=True, text=True, env=env, check=False)
+        print(res.stdout + res.stderr)
+        lines = [line for line in res.stdout.splitlines() if "127.0.0.1:18533" in line]
+        results.append(wait_until("tool log: C's entries in order, B has no access log",
+                                  lambda: res.returncode == 0 and len(lines) == 4
+                                  and "while_locked" in lines[0] and "unknown finger" in lines[1]
+                                  and "duress" in lines[2] and lines[3].endswith("matched")
+                                  and "18532: no access log" in res.stderr, 1))
+        c.cmd("node-c", "dump_access")
+        results.append(wait_until("dump_access_log writes the log to the node's log",
+                                  lambda: "Access log: 4 entries (oldest first)" in c.log("node-c"), 10))
 
         print("== Scenario 14: version reset")
         c.cmd("node-a", "reset_versions")
@@ -957,7 +998,13 @@ def main():
                                   lambda: "Version reset refused: the last sync round did not reach every peer"
                                   in c.log("node-a"), 10))
         before = {n: c.slots(n) for n in ("node-a", "node-b", "node-c")}
-        conflicts_before = sum(c.log(n).count("CONFLICT in slot") for n in ("node-a", "node-b", "node-c"))
+        # Slots already in conflict before the reset (slot 9 on A keeps reappearing: node-e, a dry-run
+        # node with another finger there, syncs with A on its own interval). After the reset no
+        # other slot may become a conflict.
+        def conflict_slots():
+            return set(re.findall(r"CONFLICT in slot (\d+)",
+                                  "".join(c.log(n) for n in ("node-a", "node-b", "node-c"))))
+        conflicts_before = conflict_slots()
         c.cmd("node-b", "sync")
         time.sleep(10)
         c.cmd("node-b", "reset_versions")
@@ -971,8 +1018,11 @@ def main():
         time.sleep(20)
         results.append(wait_until("after the reset the same fingers are in the same slots, no new conflicts",
                                   lambda: {n: c.slots(n) for n in ("node-a", "node-b", "node-c")} == before
-                                  and sum(c.log(n).count("CONFLICT in slot") for n in ("node-a", "node-b", "node-c"))
-                                  == conflicts_before, 30))
+                                  and conflict_slots() == conflicts_before, 30))
+        if not results[-1]:
+            for n in ("node-a", "node-b", "node-c"):
+                print(f"  {n}: before {before[n]}\n  {n}: after  {c.slots(n)}")
+            print("  conflict slots before/after:", sorted(conflicts_before), sorted(conflict_slots()))
         c.cmd("node-b", "delete 33")
         results.append(wait_until("after the reset changes propagate again (deletion on B reaches A and C)",
                                   lambda: all(33 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 60))
