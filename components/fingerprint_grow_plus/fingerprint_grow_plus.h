@@ -191,6 +191,10 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   template<typename F> void add_on_locked_callback(F &&cb) { this->locked_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_unlocked_callback(F &&cb) { this->unlocked_cb_.add(std::forward<F>(cb)); }
   template<typename F> void add_on_duress_callback(F &&cb) { this->duress_cb_.add(std::forward<F>(cb)); }
+  // ---- duplicate_check: (duplicate.cpp) ----
+  /// 0 = off, 1 = warn, 2 = refuse
+  void set_duplicate_check(uint8_t mode) { this->duplicate_mode_ = mode; }
+  template<typename F> void add_on_duplicate_callback(F &&cb) { this->duplicate_cb_.add(std::forward<F>(cb)); }
   // ---- schedule: (schedule.cpp) ----
   void add_schedule(uint16_t from, uint16_t to);
   void add_schedule_window(uint8_t days_mask, uint16_t from_min, uint16_t to_min);
@@ -546,6 +550,12 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint16_t duress_from_{0};
   uint16_t duress_to_{0};
   CallbackManager<void(uint16_t, uint16_t)> duress_cb_;
+  // ---- duplicate check (duplicate.cpp) ----
+  void setup_duplicate_check_();
+  void duplicate_loop_();
+  uint8_t duplicate_mode_{0};
+  bool duplicate_cancel_{false};
+  CallbackManager<void(uint16_t, uint16_t)> duplicate_cb_;
   // ---- schedule (schedule.cpp) ----
   static bool window_open_(const ScheduleWindow &w, uint8_t weekday, uint16_t minute);
   void schedule_matched_(uint16_t finger_id);

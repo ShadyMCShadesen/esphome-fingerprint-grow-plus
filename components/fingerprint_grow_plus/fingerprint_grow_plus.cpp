@@ -108,6 +108,7 @@ void FingerprintGrowPlusComponent::setup() {
   this->set_status_("starting");
   this->publish_diagnostics_();
   this->setup_led_feedback_();
+  this->setup_duplicate_check_();
 }
 
 void FingerprintGrowPlusComponent::dump_config() {
@@ -1952,6 +1953,7 @@ void FingerprintGrowPlusComponent::loop() {
 
   this->admin_loop_();
   this->lockout_loop_();
+  this->duplicate_loop_();
   this->guest_expiry_loop_();
 #ifdef USE_TEXT_SENSOR
   if (this->occupied_text_sensor_ != nullptr && this->indexed_once_ && elapsed(now, this->last_occupied_ms_, 2000)) {

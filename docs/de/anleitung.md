@@ -163,6 +163,24 @@ Backups behalten die Namen. Namen belegen RAM und Flash nur für Slots, die eine
 nur bei einer Änderung in den Flash geschrieben. Das Umbenennen eines synchronisierten Slots
 verbraucht eine Sync-Version.
 
+## Duplikat-Prüfung beim Einlernen
+
+```yaml
+fingerprint_grow_plus:
+  duplicate_check:
+    mode: refuse               # warn: nur melden; refuse: Einlernen abbrechen
+    on_duplicate:              # finger_id (schon gespeichert), slot (wird eingelernt)
+      - logger.log:
+          format: "Dieser Finger liegt schon in Slot %u"
+          args: [finger_id]
+```
+
+Beim ersten Scan jedes Einlernens wird das frische Bild in der Bibliothek gesucht (der normale
+Erkennungsweg des Sensors, derselbe wie beim Öffnen). Liegt der Finger schon in einem anderen Slot,
+löst `on_duplicate` aus; mit `refuse` wird das Einlernen abgebrochen (`on_enrollment_failed`). Den
+Finger erneut in seinen eigenen Slot einzulernen ist kein Duplikat. Die Suche verlängert den ersten
+Scan um bis zu etwa 1 s.
+
 ## Sperre nach Fehlversuchen und Notfall-Finger
 
 ```yaml

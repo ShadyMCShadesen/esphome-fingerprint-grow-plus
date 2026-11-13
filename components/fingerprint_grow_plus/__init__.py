@@ -102,6 +102,12 @@ CONF_FROM = "from"
 CONF_TO = "to"
 WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
 
+# duplicate_check:
+CONF_DUPLICATE_CHECK = "duplicate_check"
+CONF_MODE = "mode"
+CONF_ON_DUPLICATE = "on_duplicate"
+DUPLICATE_MODES = {"warn": 1, "refuse": 2}
+
 # guests:
 CONF_GUESTS = "guests"
 CONF_VALID_FOR = "valid_for"
@@ -387,6 +393,19 @@ SCHEDULE_SCHEMA = cv.Schema(
 )
 
 # ---------------------------------------------------------------------------------------
+# duplicate_check:
+# ---------------------------------------------------------------------------------------
+
+DUPLICATE_SCHEMA = cv.maybe_simple_value(
+    {
+        # warn: fire on_duplicate and enroll anyway; refuse: also cancel the enrollment
+        cv.Required(CONF_MODE): cv.one_of(*DUPLICATE_MODES, lower=True),
+        cv.Optional(CONF_ON_DUPLICATE): automation.validate_automation({}),
+    },
+    key=CONF_MODE,
+)
+
+# ---------------------------------------------------------------------------------------
 # guests:
 # ---------------------------------------------------------------------------------------
 
@@ -496,6 +515,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_LOCKOUT): LOCKOUT_SCHEMA,
             cv.Optional(CONF_DURESS): DURESS_SCHEMA,
             cv.Optional(CONF_SCHEDULE): SCHEDULE_SCHEMA,
+            cv.Optional(CONF_DUPLICATE_CHECK): DUPLICATE_SCHEMA,
             cv.Optional(CONF_SYNC): SYNC_SCHEMA,
             cv.Optional(CONF_ON_SLOT_UPDATED): automation.validate_automation({}),
             cv.Optional(CONF_ON_SLOT_DELETED): automation.validate_automation({}),
@@ -683,6 +703,20 @@ async def to_code(config):
             (
                 automation.CallbackAutomation(
                     CONF_ON_DENIED, "add_on_schedule_denied_callback", [(cg.uint16, "finger_id")]
+                ),
+            ),
+        )
+
+    if dup := config.get(CONF_DUPLICATE_CHECK):
+        cg.add(var.set_duplicate_check(DUPLICATE_MODES[dup[CONF_MODE]]))
+        await automation.build_callback_automations(
+            var,
+            dup,
+            (
+                automation.CallbackAutomation(
+                    CONF_ON_DUPLICATE,
+                    "add_on_duplicate_callback",
+                    [(cg.uint16, "finger_id"), (cg.uint16, "slot")],
                 ),
             ),
         )

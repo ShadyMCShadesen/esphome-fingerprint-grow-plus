@@ -15,6 +15,7 @@ static constexpr uint8_t PID_DATA = 0x02;
 static constexpr uint8_t PID_ACK = 0x07;
 static constexpr uint8_t PID_END_DATA = 0x08;
 
+static constexpr uint8_t CMD_SEARCH = 0x04;
 static constexpr uint8_t CMD_STORE = 0x06;
 static constexpr uint8_t CMD_LOAD_CHAR = 0x07;
 static constexpr uint8_t CMD_UP_CHAR = 0x08;
@@ -28,6 +29,8 @@ static constexpr uint8_t CMD_READ_INDEX_TABLE = 0x1F;
 
 static const char *command_name(uint8_t cmd) {
   switch (cmd) {
+    case CMD_SEARCH:
+      return "Search";
     case CMD_STORE:
       return "Store";
     case CMD_LOAD_CHAR:
@@ -298,6 +301,18 @@ uint8_t GrowLink::down_char(uint8_t buffer, const std::vector<uint8_t> &data) {
   ESP_LOGV(TAG, "DownChar: %u bytes in %u packets of %u", (unsigned) data.size(), (unsigned) packets,
            (unsigned) chunk);
   return GROW_OK;
+}
+
+uint8_t GrowLink::search(uint8_t buffer, uint16_t start, uint16_t count, uint16_t &slot, uint16_t &score) {
+  const uint8_t cmd[] = {CMD_SEARCH, buffer, (uint8_t) (start >> 8), (uint8_t) start, (uint8_t) (count >> 8),
+                         (uint8_t) count};
+  std::vector<uint8_t> ack;
+  uint8_t res = this->command_(cmd, sizeof(cmd), ack, 3000);
+  if (res == GROW_OK && ack.size() >= 5) {
+    slot = ((uint16_t) ack[1] << 8) | ack[2];
+    score = ((uint16_t) ack[3] << 8) | ack[4];
+  }
+  return res;
 }
 
 uint8_t GrowLink::store(uint8_t buffer, uint16_t slot) {

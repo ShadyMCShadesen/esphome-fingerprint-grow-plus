@@ -25,6 +25,7 @@ fingerprint_grow_plus:
   led_feedback:
   lockout:
   duress: "190-199"
+  duplicate_check: refuse
   schedule:
     ranges:
       - slots: "100-109"

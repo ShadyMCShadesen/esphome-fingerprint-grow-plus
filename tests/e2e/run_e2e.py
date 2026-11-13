@@ -57,6 +57,15 @@ def schedule_block():
     )
 
 
+DUPLICATE = (
+    "\n  duplicate_check:"
+    "\n    mode: refuse"
+    "\n    on_duplicate:"
+    "\n      - logger.log:"
+    "\n          format: 'TEST-EVENT duplicate %u %u'"
+    "\n          args: [finger_id, slot]"
+)
+
 LOCKOUT = (
     "\n  lockout:"
     "\n    max_attempts: 3"
@@ -296,7 +305,7 @@ class Cluster:
                 pty=self.path(name, "pty"),
                 cmd=self.path(name, "cmd"),
                 admin_extra="\n    access: delayed" if cfg.get("standalone") else "",
-                top_extra=("\n  led_feedback:" + schedule_block() if cfg.get("standalone") else "")
+                top_extra=("\n  led_feedback:" + DUPLICATE + schedule_block() if cfg.get("standalone") else "")
                 + cfg.get("top_extra", ""),
                 sync_block=sync_block,
             )
@@ -805,6 +814,17 @@ def main():
         time.sleep(4)
         results.append(wait_until("a finger inside its window does not",
                                   lambda: "TEST-EVENT denied 45" not in c.log("node-f"), 1))
+
+        print("== Scenario 10d: duplicate check while enrolling")
+        time.sleep(3)
+        c.cmd("node-f", "enroll_named 2 dup")
+        results.append(wait_until("an enrollment starts", lambda: "dup" in c.log("node-f")
+                                  or c.log("node-f").count("TEST-EVENT enroll_started") >= 2, 10))
+        time.sleep(1.5)
+        c.touch("node-f", "alma")  # alma is already stored in slot 45
+        results.append(wait_until("the finger is found in slot 45 and the enrollment is refused",
+                                  lambda: re.search(r"TEST-EVENT duplicate 45 \d+", c.log("node-f")) is not None
+                                  and "alma" not in [f for sl, f in c.slots("node-f").items() if sl != 45], 15))
 
         print("== Scenario 11: node syncing only the admin slot, local features on all other slots")
         results.append(wait_until("node-g received the admin finger (slot 0) from A",

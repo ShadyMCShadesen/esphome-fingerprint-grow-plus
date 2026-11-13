@@ -205,6 +205,24 @@ The text sensor `last_name` shows the name of the last recognised finger (`#<slo
 name), and backups keep the names. Names cost RAM and flash only for slots that have one; they
 are written to flash only when a name changes. Renaming a synced slot uses one sync version.
 
+## Duplicate check
+
+```yaml
+fingerprint_grow_plus:
+  duplicate_check:
+    mode: refuse               # warn: only report; refuse: cancel the enrollment
+    on_duplicate:              # finger_id (already stored), slot (being enrolled)
+      - logger.log:
+          format: "This finger is already stored in slot %u"
+          args: [finger_id]
+```
+
+At the first scan of every enrollment the fresh image is searched in the library (the module's
+normal matching, the same as for opening the door). If the finger is already stored in another
+slot, `on_duplicate` fires; with `refuse` the enrollment is cancelled (`on_enrollment_failed`).
+Enrolling a finger again into its own slot is not a duplicate. The search adds up to about
+1 s to the first scan.
+
 ## Lockout and duress finger
 
 ```yaml
@@ -404,6 +422,10 @@ fingerprint_grow_plus:
   duress:
     slots: "190-199"                  # or just duress: "190-199"
     on_duress: []                     # finger_id, confidence
+
+  duplicate_check:
+    mode: refuse                      # warn | refuse
+    on_duplicate: []                  # finger_id (stored), slot (being enrolled)
 
   schedule:                           # needs time_id
     without_time: deny                # deny | allow while the time is unknown

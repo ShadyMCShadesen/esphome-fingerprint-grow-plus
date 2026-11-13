@@ -61,6 +61,9 @@ class GrowLink {
   uint8_t down_char(uint8_t buffer, const std::vector<uint8_t> &data);
   /// Raw ReadSysPara answer (16 parameter bytes) of the last read_params() call.
   const uint8_t *last_params_raw() const { return this->last_params_raw_; }
+  /// Search the library slots [start, start + count) for the features in CharBuffer `buffer`
+  /// (the module's normal 1:N matching). GROW_OK: `slot` and `score` are set; 0x09: no match.
+  uint8_t search(uint8_t buffer, uint16_t start, uint16_t count, uint16_t &slot, uint16_t &score);
   uint8_t store(uint8_t buffer, uint16_t slot);
   uint8_t delete_char(uint16_t slot, uint16_t count);
   uint8_t read_notepad(uint8_t page, uint8_t out[32]);

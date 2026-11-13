@@ -170,10 +170,12 @@ class Sim:
                 self.ack(0x00)
             else:
                 self.ack(0x0A)
-        elif cmd == 0x04:  # Search
+        elif cmd == 0x04:  # Search (buffer, start page, page count)
             want = self.buffers.get(args[0], b"")[:16]
+            start = (args[1] << 8) | args[2] if len(args) >= 5 else 0
+            count = (args[3] << 8) | args[4] if len(args) >= 5 else CAPACITY
             for slot, tpl in sorted(self.templates.items()):
-                if tpl[:16] == want:
+                if start <= slot < start + count and tpl[:16] == want:
                     self.ack(0x00, bytes([slot >> 8, slot & 0xFF, 0, 200]))
                     break
             else:

@@ -54,7 +54,9 @@ End-to-end scenarios:
     slots cannot be moved.
 18. Version reset: refused on a node whose last round missed a peer; on another node it resets
     all nodes, keeps every finger in its slot, creates no conflict, and later changes propagate.
-19. `SetPwd` is never sent to any sensor.
+19. Duplicate check: enrolling a finger that is already stored fires `on_duplicate` and, with
+    `refuse`, cancels the enrollment; enrolling a new finger still works.
+20. `SetPwd` is never sent to any sensor.
 
 The simulator (`tests/sim/r503_sim.py`) implements the R503 packet protocol subset used by
 `fingerprint_grow` and `fingerprint_grow_plus` with synthetic templates (no real biometric data).
@@ -72,6 +74,7 @@ Recommended for the proof of concept: two nodes with the same hardware but diffe
 | A2 | `UpChar` of a slot returns identical bytes each time | log line `Template bytes of slot … changed` must not appear after two rounds | no such line (if it appears: harmless, sync still correct) |
 | A3 | template size and packet size | check `Slot N indexed (template … bytes)` and `Sensor: capacity …, packet size …` | **observed on R503: 1536 bytes, 128-byte packets** (manual: 768) |
 | A4 | a template survives sensor → ESP → sensor unchanged | every sync write is read back and compared byte by byte; `Verification of slot … failed` must not appear | **observed on R503: byte-identical with 0, 10 and 40 ms packet gaps** (10 ms used as margin) |
+| A6 | `Search` with the first enrollment scan (`duplicate_check`) | enroll a finger that is already stored in another slot with `duplicate_check: warn` | `on_duplicate` with the stored slot; a new finger gives no warning |
 | A5 | `Match` template vs template | (checked during development) | **observed on R503: arbitrary scores (0 or 92 for the same pair)** → not used |
 
 ### B. Functional tests
