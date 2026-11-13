@@ -408,8 +408,32 @@ py tools\growplus.py restore --host 192.168.10.21 --port 18530 --key '<Schlüsse
 
 Backup-Dateien enthalten biometrische Daten: nie in ein Repository legen.
 
-Dasselbe Tool liest auch Zugriffsprotokolle: `growplus.py log --host H1 --host H2:18531 --key '<Schlüssel>'`
-(siehe [Zugriffsprotokoll](#zugriffsprotokoll)).
+Weitere Befehle desselben Tools:
+
+| Befehl | Zweck |
+|---|---|
+| `status --host H [--include-local]` | alle Slots mit Name, Gast-Ablauf und Nutzungen auflisten |
+| `compare A B [--include-local]` | Backups und/oder Geräte vergleichen (`A`, `B` = Datei oder `host[:port]`); Exit-Code 1 bei Unterschieden |
+| `copy --from A --to H [--slots ..] [--dry-run] [--overwrite]` | Finger von einem Gerät oder Backup auf ein anderes Gerät kopieren |
+| `log --host H1 --host H2:18531 [--csv]` | zusammengeführtes Zugriffsprotokoll (siehe [Zugriffsprotokoll](#zugriffsprotokoll)) |
+
+```bash
+# erst anzeigen, was passieren würde, dann kopieren
+python3 tools/growplus.py copy --from 192.168.10.21 --to 192.168.10.22 --key '<Schlüssel>' --slots 10-19 --dry-run
+python3 tools/growplus.py copy --from 192.168.10.21 --to 192.168.10.22 --key '<Schlüssel>' --slots 10-19
+```
+
+- `compare` vergleicht Slot für Slot per Prüfsumme. „different template“ heißt: ein anderer Finger
+  *oder* derselbe Finger neu eingelernt (jedes Einlernen ergibt ein neues Template). Lokale Slots
+  eines Geräts werden nur mit `--include-local` verglichen.
+- `copy` schreibt jeden Finger in dieselbe Slot-Nummer auf dem Ziel, mit Name und Gast-Daten. Am
+  Ziel vorher `allow_restore` **und** `allow_full_backup` auslösen (Letzteres zeigt dem Tool die
+  lokalen Slots des Ziels, damit es nie unbemerkt einen ersetzt); für `--include-local` an der
+  Quelle `allow_full_backup`. Slots mit demselben Finger werden übersprungen, Slots mit einem
+  anderen Finger nur mit `--overwrite` ersetzt. Kopierte synchronisierte Slots verteilt das Ziel
+  wie bei einem Restore an seine Partner.
+- Typischer Einsatz: einer neuen Station die Finger einer bestehenden geben, ohne sie dauerhaft
+  zu synchronisieren (z. B. eine Station, die nur den Admin-Finger synchronisiert).
 
 ## Entitäten
 

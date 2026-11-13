@@ -63,6 +63,30 @@ python3 tools/growplus.py backup --host <node-ip> --port 18530 --key '<key>' --o
    is the point of a rollback. If you only want to repair one node, restore only the slots in
    question. Local-only slots from an `--include-local` backup are written to this node only.
 
+## Listing, comparing and copying
+
+```bash
+# all slots of a node with name, guest expiry and uses (--include-local needs allow_full_backup)
+python3 tools/growplus.py status  --host <node-ip> --key '<key>' --include-local
+# compare two backups, two nodes or a backup with a node (exit code 1 if they differ)
+python3 tools/growplus.py compare <node>.fgpb <node-ip>:18530 --key '<key>'
+# copy fingers from one node (or a backup) to another; first show the plan
+python3 tools/growplus.py copy --from <node-a-ip> --to <node-b-ip> --key '<key>' --slots 10-19 --dry-run
+python3 tools/growplus.py copy --from <node-a-ip> --to <node-b-ip> --key '<key>' --slots 10-19
+```
+
+- `compare` matches slots by number and compares the templates by checksum. "Different template"
+  means another finger *or* the same finger enrolled again (a new enrollment gives a new
+  template). Local-only slots of a node are only compared with `--include-local`.
+- `copy` writes each finger into the same slot number on the target, with its name and guest
+  data, through the target's restore path: run `allow_restore` **and** `allow_full_backup` on
+  the target first (the second one lets the tool see the target's local-only slots, so it never
+  replaces one unseen), and `allow_full_backup` on the source for `--include-local`. Slots that
+  already hold the same finger are skipped; slots with another finger are skipped unless
+  `--overwrite`. Copied synced slots spread to the target's peers like a restore.
+- Typical use: give a new station the fingers of an existing one without syncing them
+  permanently (e.g. a station that syncs only its admin finger).
+
 ## Replacing a sensor
 
 Install the new sensor and reboot the node. Its index is empty, which the sync treats as

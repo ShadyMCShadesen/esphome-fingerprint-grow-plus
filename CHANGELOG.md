@@ -19,6 +19,9 @@ versioning: [Semantic Versioning](https://semver.org/).
   unknown, outside schedule, while locked, duress); `on_entry` trigger, text sensor
   `last_access`, actions `dump_access_log` / `clear_access_log`, `growplus.py log` merges the logs
   of several nodes (protocol version 7, `ACCESS_LOG_REQ` / `ACCESS_LOG`).
+- `tools/growplus.py`: `status --include-local` lists all slots with name, guest expiry and uses;
+  `compare` compares backups and/or nodes; `copy` copies fingers from a node or backup to another
+  node (dry run, skips other fingers unless `--overwrite`).
 - `duplicate_check:` (optional, `warn` | `refuse`): at the first enrollment scan the fresh image
   is searched in the library; a finger already stored in another slot fires `on_duplicate` and,
   with `refuse`, cancels the enrollment.

@@ -382,8 +382,16 @@ py tools\growplus.py inspect --key '<key>' --in reader-garden.fgpb
 py tools\growplus.py restore --host 192.168.10.21 --port 18530 --key '<key>' --in reader-garden.fgpb
 ```
 
-The same tool reads access logs: `growplus.py log --host H1 --host H2:18531 --key '<key>'`
-(see [Access log](#access-log)).
+More commands of the same tool:
+
+| Command | Purpose |
+|---|---|
+| `status --host H [--include-local]` | list the slots with name, guest expiry and uses |
+| `compare A B [--include-local]` | compare backups and/or nodes (`A`, `B` = file or `host[:port]`); exit code 1 if different |
+| `copy --from A --to H [--slots ..] [--dry-run] [--overwrite]` | copy fingers from a node or backup to another node (same slots, with names; `allow_restore` + `allow_full_backup` on the target) |
+| `log --host H1 --host H2:18531 [--csv]` | merged access log (see [Access log](#access-log)) |
+
+Details: [docs/operations.md](docs/operations.md#listing-comparing-and-copying).
 
 - `--host`: IP address or DNS name of the node (`.local` works where your PC resolves mDNS);
   `--port` only if the node does not use 18530.

@@ -7,7 +7,9 @@ By default only synced slots are saved; --include-local adds the local-only slot
 
 Commands
   genkey                                   print a new random key for secrets.yaml
-  status  --host H                         list the synced slots of a node (no template data)
+  status  --host H [--include-local]       list the slots of a node with name, guest expiry and
+                                           uses (no template data); --include-local adds the
+                                           local-only slots (run allow_full_backup first)
   backup  --host H --out FILE              download all synced templates into an encrypted file;
           [--include-local]                --include-local also saves the slots that are not
                                            synced (run allow_full_backup on the node first)
@@ -15,6 +17,12 @@ Commands
   inspect --in FILE                        list the content of a backup file
   log     --host H [--host H2:PORT ...]    access log of one or more nodes (access_log:),
           [--csv]                          merged and sorted by time
+  compare A B [--include-local]            compare two backups and/or nodes (A, B = backup file
+                                           or host[:port]); exit code 1 if they differ
+  copy    --from A --to H [--slots ..]     copy fingers from a node or backup file to another
+          [--include-local] [--overwrite]  node (target must run allow_restore and
+          [--dry-run]                      allow_full_backup first); slots that hold another
+                                           finger on the target are skipped unless --overwrite
 
 The key is read from --key, from --key-file or from the environment variable GROWPLUS_KEY.
 Backup files are encrypted and authenticated with a key derived from the shared key.
@@ -355,10 +363,82 @@ def cmd_status(args):
     key = load_key(args)
     ch = connect(args, key)
     entries = read_manifest(ch)
+    local = read_local_list(ch) if args.include_local else {}
     finish(ch)
-    print(f"Node {ch.peer_id:08X} at {args.host}: {len(entries)} synced slot entries")
-    for slot, (meta, _h, extra) in sorted(entries.items()):
-        print(f"  slot {slot:4d}  {STATE_NAMES[meta >> 14]:<17} version {meta & 0x3FFF}{describe(extra)}")
+    if local is None:
+        sys.exit("Node refused the local slots: run the fingerprint_grow_plus.allow_full_backup action "
+                 "on the node first (or leave out --include-local)")
+    rows = {slot: f"{STATE_NAMES[meta >> 14]:<17} version {meta & 0x3FFF}{describe(extra)}"
+            for slot, (meta, _h, extra) in entries.items()}
+    rows.update({slot: f"{'local only':<17} {'':9}{describe(extra)}" for slot, extra in local.items()})
+    present = [e for e in entries.values() if (e[0] >> 14) in (1, 2)]
+    extras = [e[2] for e in present] + list(local.values())
+    print(f"Node {ch.peer_id:08X} at {args.host}: {len(present)} synced finger(s), "
+          f"{len(entries) - len(present)} deleted slot(s)"
+          + (f", {len(local)} local-only finger(s)" if args.include_local else " (local-only slots not listed)"))
+    print(f"  {sum(1 for e in extras if e['name'])} named, {sum(1 for e in extras if e['expires'])} guest(s)")
+    for slot in sorted(rows):
+        print(f"  slot {slot:4d}  {rows[slot]}")
+
+
+# --------------------------------------------------------------------------- snapshots
+def split_host(spec: str, default_port: int):
+    host, _, port = spec.rpartition(":") if spec.count(":") == 1 else (spec, "", "")
+    return (host, int(port)) if port else (spec, default_port)
+
+
+def node_snapshot(ch: Channel, include_local: bool, templates: bool):
+    """Slots of a live node: {slot: entry}; entry like a backup entry plus 'hash' (bytes).
+    Synced slots carry the hash from the manifest; local-only slots (include_local) are fetched
+    to compute it. With templates=True every template is fetched and kept in 'template'."""
+    snap = {}
+    for slot, (meta, digest, extra) in read_manifest(ch).items():
+        if (meta >> 14) in (1, 2):
+            snap[slot] = dict(extra, meta=meta, local=False, hash=digest)
+    if include_local:
+        local = read_local_list(ch)
+        if local is None:
+            return None
+        for slot, extra in local.items():
+            snap[slot] = dict(extra, meta=0, local=True, hash=None)
+    for slot, entry in snap.items():
+        if templates or entry["hash"] is None:
+            result = fetch_template(ch, slot)
+            if result is None:
+                entry["error"] = "node could not read it"
+                continue
+            data = result[2]
+            entry["hash"] = hashlib.sha256(data).digest()[:8]
+            if templates:
+                entry["template"] = base64.b64encode(data).decode()
+    return {slot: e for slot, e in snap.items() if "error" not in e}
+
+
+def file_snapshot(path: str, key: bytes):
+    data = read_backup(path, key)
+    snap = {}
+    for slot_text, entry in data["slots"].items():
+        tpl = base64.b64decode(entry["template"])
+        snap[int(slot_text)] = dict(entry, hash=hashlib.sha256(tpl).digest()[:8])
+    return snap
+
+
+def load_snapshot(spec: str, args, key: bytes, templates: bool):
+    """A backup file (if the path exists) or a node given as host[:port]. Returns (label, snapshot)."""
+    if os.path.isfile(spec):
+        return spec, file_snapshot(spec, key)
+    host, port = split_host(spec, args.port)
+    ch = connect(argparse.Namespace(host=host, port=port, timeout=args.timeout), key)
+    snap = node_snapshot(ch, args.include_local, templates)
+    finish(ch)
+    if snap is None:
+        sys.exit(f"{spec} refused the local slots: run allow_full_backup on that node first "
+                 "(or leave out --include-local)")
+    return f"{host}:{port}", snap
+
+
+def same_extra(a: dict, b: dict) -> bool:
+    return all(a.get(k, d) == b.get(k, d) for k, d in (("name", ""), ("expires", 0), ("uses", 0)))
 
 
 def describe(extra: dict) -> str:
@@ -425,14 +505,7 @@ def cmd_restore(args):
         slot = int(slot_text)
         if wanted and slot not in wanted:
             continue
-        tpl = base64.b64decode(entry["template"])
-        ch.send(bytes([MSG_RESTORE]) + struct.pack(">H", slot) + pack_extra(entry) + struct.pack(">H", len(tpl))
-                + tpl)
-        while True:
-            msg = ch.recv()
-            if msg[0] == MSG_RESTORE_ACK:
-                break
-        result = msg[3]
+        result = restore_slot(ch, slot, entry)
         if result == 0:
             ok += 1
             print(f"  slot {slot}: restored")
@@ -443,6 +516,102 @@ def cmd_restore(args):
             print(f"  slot {slot}: FAILED on the node", file=sys.stderr)
     finish(ch)
     print(f"{ok} template(s) restored; synced slots are propagated to the peers, local-only slots stay on the node")
+
+
+def cmd_compare(args):
+    key = load_key(args)
+    wanted = parse_slots(args.slots)
+    label_a, a = load_snapshot(args.a, args, key, templates=False)
+    label_b, b = load_snapshot(args.b, args, key, templates=False)
+    if wanted:
+        a = {k: v for k, v in a.items() if k in wanted}
+        b = {k: v for k, v in b.items() if k in wanted}
+    print(f"A = {label_a} ({len(a)} finger(s))\nB = {label_b} ({len(b)} finger(s))")
+    if not args.include_local and not (os.path.isfile(args.a) and os.path.isfile(args.b)):
+        print("  (local-only slots of nodes are not compared; use --include-local)")
+    same = 0
+    lines = []
+    for slot in sorted(set(a) | set(b)):
+        ea, eb = a.get(slot), b.get(slot)
+        if eb is None:
+            lines.append(f"  slot {slot:4d}  only in A{describe(ea)}")
+        elif ea is None:
+            lines.append(f"  slot {slot:4d}  only in B{describe(eb)}")
+        elif ea["hash"] != eb["hash"]:
+            lines.append(f"  slot {slot:4d}  different template (another finger or enrolled again)"
+                         f"  A:{describe(ea) or ' -'}  B:{describe(eb) or ' -'}")
+        elif not same_extra(ea, eb):
+            lines.append(f"  slot {slot:4d}  same finger, other data  A:{describe(ea) or ' -'}  B:{describe(eb) or ' -'}")
+        else:
+            same += 1
+    print("\n".join(lines))
+    print(f"{same} identical, {len(lines)} different")
+    sys.exit(1 if lines else 0)
+
+
+def restore_slot(ch: Channel, slot: int, entry: dict) -> int:
+    """Send one RESTORE and wait for its ACK. Returns the node's result (0 ok, 1 failed, 2 refused)."""
+    tpl = base64.b64decode(entry["template"])
+    ch.send(bytes([MSG_RESTORE]) + struct.pack(">H", slot) + pack_extra(entry) + struct.pack(">H", len(tpl)) + tpl)
+    while True:
+        msg = ch.recv()
+        if msg[0] == MSG_RESTORE_ACK:
+            return msg[3]
+
+
+def cmd_copy(args):
+    key = load_key(args)
+    wanted = parse_slots(args.slots)
+    label_src, src = load_snapshot(args.source, args, key, templates=True)
+    if wanted:
+        src = {k: v for k, v in src.items() if k in wanted}
+    host, port = split_host(args.to, args.port)
+    ch = connect(argparse.Namespace(host=host, port=port, timeout=args.timeout), key)
+    target = {slot: (digest, extra) for slot, (meta, digest, extra) in read_manifest(ch).items()
+              if (meta >> 14) in (1, 2)}
+    target_local = read_local_list(ch)  # only with allow_full_backup on the target
+    print(f"Copy {len(src)} finger(s) from {label_src} to {host}:{port}"
+          + (" (dry run)" if args.dry_run else ""))
+    hidden = target_local is None
+    if hidden:
+        target_local = {}
+        print("  note: the target's local-only slots are not visible (allow_full_backup is not active there)")
+    plan = []
+    for slot, entry in sorted(src.items()):
+        if slot in target and target[slot][0] == entry["hash"]:
+            if same_extra(entry, target[slot][1]):
+                print(f"  slot {slot:4d}  already there, skipped{describe(entry)}")
+                continue
+            # Same finger, other name / guest data: taking over the data replaces nothing.
+            plan.append((slot, entry))
+            print(f"  slot {slot:4d}  update name / guest data{describe(entry)}")
+            continue
+        occupied = slot in target or slot in target_local
+        if occupied and not args.overwrite:
+            print(f"  slot {slot:4d}  SKIPPED: the target holds another finger here (--overwrite replaces it)")
+            continue
+        plan.append((slot, entry))
+        print(f"  slot {slot:4d}  {'replace' if occupied else 'copy'}{describe(entry)}")
+    if args.dry_run or not plan:
+        finish(ch)
+        print(f"{len(plan)} slot(s) would be written" if args.dry_run else "Nothing to copy")
+        return
+    if hidden and not args.overwrite:
+        finish(ch)
+        sys.exit("Not copied: a local-only finger on the target could be replaced unseen. Run "
+                 "fingerprint_grow_plus.allow_full_backup on the target as well (or pass --overwrite)")
+    ok = 0
+    for slot, entry in plan:
+        result = restore_slot(ch, slot, entry)
+        if result == 2:
+            finish(ch)
+            sys.exit("Target refused the restore: run the fingerprint_grow_plus.allow_restore action on it first")
+        if result == 0:
+            ok += 1
+        else:
+            print(f"  slot {slot}: FAILED on the target", file=sys.stderr)
+    finish(ch)
+    print(f"{ok} of {len(plan)} finger(s) copied; synced slots are propagated to the target's peers")
 
 
 def cmd_log(args):
@@ -497,7 +666,31 @@ def main():
     sub.add_parser("genkey").set_defaults(func=cmd_genkey)
     p = sub.add_parser("status")
     common(p)
+    p.add_argument("--include-local", "--all", action="store_true",
+                   help="also list slots that are not synced (needs allow_full_backup on the node)")
     p.set_defaults(func=cmd_status)
+    p = sub.add_parser("compare")
+    common(p, needs_host=False)
+    p.add_argument("a", help="backup file or node (host[:port])")
+    p.add_argument("b", help="backup file or node (host[:port])")
+    p.add_argument("--port", type=int, default=DEFAULT_PORT, help="default port for nodes")
+    p.add_argument("--timeout", type=float, default=30)
+    p.add_argument("--slots", help="e.g. 0,2,10-19 (default: all)")
+    p.add_argument("--include-local", "--all", action="store_true",
+                   help="also compare a node's local-only slots (needs allow_full_backup there)")
+    p.set_defaults(func=cmd_compare)
+    p = sub.add_parser("copy")
+    common(p, needs_host=False)
+    p.add_argument("--from", dest="source", required=True, help="backup file or node (host[:port])")
+    p.add_argument("--to", required=True, help="target node (host[:port]); run allow_restore there first")
+    p.add_argument("--port", type=int, default=DEFAULT_PORT, help="default port for nodes")
+    p.add_argument("--timeout", type=float, default=30)
+    p.add_argument("--slots", help="e.g. 0,2,10-19 (default: all)")
+    p.add_argument("--include-local", "--all", action="store_true",
+                   help="also copy the source node's local-only slots (needs allow_full_backup there)")
+    p.add_argument("--overwrite", action="store_true", help="replace other fingers on the target")
+    p.add_argument("--dry-run", action="store_true", help="only show what would be copied")
+    p.set_defaults(func=cmd_copy)
     p = sub.add_parser("backup")
     common(p)
     p.add_argument("--out", required=True, help="backup file to write, e.g. reader-garden.fgpb")

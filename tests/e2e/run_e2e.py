@@ -1027,6 +1027,67 @@ def main():
         results.append(wait_until("after the reset changes propagate again (deletion on B reaches A and C)",
                                   lambda: all(33 not in c.slots(n) for n in ("node-a", "node-b", "node-c")), 60))
 
+        print("== Scenario 15: tool status / compare / copy")
+
+        def run_tool(*argv):
+            r = subprocess.run(tool + list(argv), capture_output=True, text=True, env=env, check=False)
+            print(r.stdout + r.stderr)
+            return r
+
+        def node(name):
+            return f"127.0.0.1:{NODES[name]['port']}"
+
+        res = run_tool("status", "--host", "127.0.0.1", "--port", g_port, "--include-local")
+        results.append(wait_until("status --include-local is refused without allow_full_backup",
+                                  lambda: res.returncode != 0 and "allow_full_backup" in res.stderr, 1))
+        c.cmd("node-g", "allow_full_backup")
+        time.sleep(2)
+        res = run_tool("status", "--host", "127.0.0.1", "--port", g_port, "--include-local")
+        results.append(wait_until("status --include-local lists G's local slots with their names",
+                                  lambda: res.returncode == 0 and "1 synced finger(s)" in res.stdout
+                                  and any(line.startswith("  slot    3  local only") and "Ivo" in line
+                                          for line in res.stdout.splitlines()), 1))
+        res = run_tool("compare", node("node-a"), node("node-b"))
+        results.append(wait_until("compare: A and B hold the same synced fingers (exit 0)",
+                                  lambda: res.returncode == 0 and " 0 different" in res.stdout, 1))
+        res = run_tool("compare", node("node-a"), node("node-g"))
+        results.append(wait_until("compare: A has fingers G does not sync (exit 1, 'only in A')",
+                                  lambda: res.returncode == 1 and "only in A" in res.stdout, 1))
+        res = run_tool("compare", str(full), str(full))
+        results.append(wait_until("compare: a backup with itself is identical",
+                                  lambda: res.returncode == 0 and " 0 different" in res.stdout, 1))
+
+        h_before = c.slots("node-h")
+        res = run_tool("copy", "--from", node("node-g"), "--to", node("node-h"), "--include-local",
+                       "--slots", "3", "--dry-run")
+        results.append(wait_until("copy --dry-run plans slot 3 and writes nothing",
+                                  lambda: res.returncode == 0 and "slot    3  copy  Ivo" in res.stdout
+                                  and c.slots("node-h") == h_before, 1))
+        res = run_tool("copy", "--from", node("node-g"), "--to", node("node-h"), "--include-local", "--slots", "3")
+        results.append(wait_until("copy refuses while the target's local slots are not visible",
+                                  lambda: res.returncode != 0 and "allow_full_backup on the target" in res.stderr
+                                  and 3 not in c.slots("node-h"), 1))
+        c.cmd("node-h", "allow_full_backup")
+        time.sleep(2)
+        res = run_tool("copy", "--from", node("node-g"), "--to", node("node-h"), "--include-local", "--slots", "3")
+        results.append(wait_until("copy without allow_restore on the target is refused",
+                                  lambda: res.returncode != 0 and "allow_restore" in res.stderr
+                                  and 3 not in c.slots("node-h"), 1))
+        c.cmd("node-h", "allow_restore")
+        time.sleep(2)
+        res = run_tool("copy", "--from", node("node-g"), "--to", node("node-h"), "--include-local", "--slots", "1,3")
+        clash = 1 in h_before and h_before[1] != "gina"
+        results.append(wait_until("copy G -> H: slot 3 (Ivo) copied with its name"
+                                  + (", slot 1 skipped (another finger there)" if clash else ""),
+                                  lambda: res.returncode == 0 and c.slots("node-h").get(3) == "ivo"
+                                  and name_on("node-h", 3, "Ivo")
+                                  and (c.slots("node-h").get(1) == h_before[1] and "SKIPPED" in res.stdout
+                                       if clash else c.slots("node-h").get(1) == "gina"), 30))
+        res = run_tool("copy", "--from", node("node-g"), "--to", node("node-h"), "--include-local", "--slots", "3")
+        results.append(wait_until("copying again changes nothing (already there)",
+                                  lambda: res.returncode == 0 and "already there" in res.stdout
+                                  and "Nothing to copy" in res.stdout, 1))
+
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)
         results.append(wait_until("no SetPwd was ever sent to a sensor", lambda: "SetPwd" not in sim_logs, 1))
     finally:
