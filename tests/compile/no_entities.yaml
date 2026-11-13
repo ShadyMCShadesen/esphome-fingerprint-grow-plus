@@ -1,0 +1,33 @@
+# Compile check: every optional block enabled, but no sensor / text_sensor / binary_sensor
+# entities. Catches code that only builds when an entity platform is present (#ifdef USE_*).
+esphome:
+  name: no-entities
+host:
+logger:
+time:
+  - platform: host
+    id: host_time
+uart:
+  port: /tmp/no-entities.pty
+  baud_rate: 57600
+fingerprint_grow:
+external_components:
+  - source:
+      type: local
+      path: ../../components
+    components: [fingerprint_grow_plus]
+fingerprint_grow_plus:
+  time_id: host_time
+  delete_all_code: CHECK_ONLY
+  admin:
+    access: delayed
+  guests: {slots: "150-159", uses: 2}
+  led_feedback:
+  lockout:
+  duress: "190-199"
+  schedule:
+    ranges:
+      - slots: "100-109"
+        times: [{days: mon-fri, from: "08:00", to: "12:00"}]
+  sync:
+    key: "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="

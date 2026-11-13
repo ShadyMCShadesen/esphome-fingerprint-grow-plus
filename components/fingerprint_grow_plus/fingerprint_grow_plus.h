@@ -473,7 +473,6 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   sensor::Sensor *last_sync_sensor_{nullptr};
   sensor::Sensor *versions_left_sensor_{nullptr};
   sensor::Sensor *failed_attempts_sensor_{nullptr};
-  bool versions_low_warned_{false};
 #endif
 #ifdef USE_TEXT_SENSOR
   text_sensor::TextSensor *status_text_sensor_{nullptr};
@@ -577,6 +576,7 @@ class FingerprintGrowPlusComponent : public Component, public uart::UARTDevice {
   uint32_t last_expiry_check_ms_{0};
   bool last_round_ok_{true};
   uint32_t rounds_done_{0};
+  bool versions_low_warned_{false};
   bool epoch_dirty_{false};
   void rebase_(uint16_t epoch);
   std::vector<uint32_t> expires_;

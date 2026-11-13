@@ -6,7 +6,7 @@ protected slots, and optional template sync directly between ESPHome nodes (`syn
 Assistant, no broker, no cloud). Without `sync:` a node runs stand-alone (no network port).
 
 ## Check everything (use this, not the single steps)
-- `tests/check.sh --quick` – unit tests + example configs (~1 min)
+- `tests/check.sh --quick` – unit tests, example configs, compile without entities (~2 min)
 - `tests/check.sh` – plus end-to-end tests (~8 min). Prints only failures and a summary.
 - `ESPHOME=/path/to/esphome` if `esphome` is not on PATH. ESP32 builds only run in CI.
 
@@ -45,6 +45,8 @@ Assistant, no broker, no cloud). Without `sync:` a node runs stand-alone (no net
 - Arduino core macros (`word`, `bit`, `lowByte`, `highByte`, `constrain`, `sq`, `round`, …) must
   never be used as identifiers (a lambda named `word` broke ReadSysPara on Arduino builds only).
 - C++: ESPHome style (`this->`, trailing `_` for protected members), English comments.
+- Members used outside `#ifdef USE_SENSOR/USE_TEXT_SENSOR/USE_BINARY_SENSOR` must be declared
+  outside those blocks too (`tests/compile/no_entities.yaml` checks a build without entities).
 - Every change: `tests/check.sh` must pass. Update README reference and the German guide with it.
 
 ## Privacy rules (public repository)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command for all checks, with short output: only failures and a summary.
 #   tests/check.sh          unit tests + example configs + end-to-end tests (~8 min)
-#   tests/check.sh --quick  unit tests + example configs only (~1 min)
+#   tests/check.sh --quick  unit tests, example configs, compile without entities (~2 min)
 # ESPHOME=/path/to/esphome selects the esphome binary (default: from PATH).
 set -u
 cd "$(dirname "$0")/.."
@@ -30,6 +30,7 @@ step unit tests/run_unit_tests.sh
 for ex in esp32-arduino esp32-idf esp8266 standalone; do
   step "config-$ex" bash -c "cd examples && '$ESPHOME' config $ex.yaml"
 done
+step compile-no-entities bash -c "cd tests/compile && '$ESPHOME' compile no_entities.yaml"
 if [ "${1:-}" != "--quick" ]; then
   if python3 tests/e2e/run_e2e.py --esphome "$ESPHOME" >"$LOG/e2e.log" 2>&1; then
     echo "ok    e2e ($(grep -o '[0-9]*/[0-9]* checks passed' "$LOG/e2e.log"))"
