@@ -403,6 +403,26 @@ class Cluster:
             f.write(f"touch {finger}\n")
 
 
+def table(text):
+    """Rows of the first text table printed by tools/growplus.py, as {header: cell} dicts."""
+    lines = text.splitlines()
+    for i in range(1, len(lines)):
+        if lines[i].startswith("-") and "-+-" in lines[i]:
+            heads = [h.strip() for h in lines[i - 1].split(" | ")]
+            rows = []
+            for line in lines[i + 1:]:
+                if " | " not in line and not line.strip().isdigit():
+                    break
+                cells = [c.strip() for c in line.split(" | ")]
+                rows.append(dict(zip(heads, cells + [""] * (len(heads) - len(cells)))))
+            return rows
+    return []
+
+
+def slots_in(text):
+    return {int(r["Slot"]): r for r in table(text) if r.get("Slot", "").isdigit()}
+
+
 def wait_until(desc, predicate, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -632,9 +652,9 @@ def main():
         res = subprocess.run(tool + ["backup", "--host", "127.0.0.1", "--port", "18531", "--out", str(backup)],
                              capture_output=True, text=True, env=env, check=False)
         print(res.stdout + res.stderr)
-        results.append(wait_until("the backup keeps slot names", lambda: "slot 0: 1536 bytes  Chef" in res.stdout, 1))
+        results.append(wait_until("the backup keeps slot names", lambda: slots_in(res.stdout).get(0, {}).get("Name") == "Chef", 1))
         results.append(wait_until("backup contains slots 0, 2, 3",
-                                  lambda: res.returncode == 0 and all(f"  slot {n}:" in res.stdout for n in (0, 2, 3)), 1))
+                                  lambda: res.returncode == 0 and {0, 2, 3} <= set(slots_in(res.stdout)), 1))
         raw = backup.read_bytes() if backup.exists() else b""
         results.append(wait_until("backup file is encrypted (no template bytes in clear)",
                                   lambda: b"frank" not in raw and b"admin" not in raw and len(raw) > 100, 1))
@@ -665,7 +685,7 @@ def main():
                                               for n in ("node-a", "node-b", "node-c")), 90))
         res = subprocess.run(tool + ["status", "--host", "127.0.0.1", "--port", "18532"],
                              capture_output=True, text=True, env=env, check=False)
-        results.append(wait_until("status command lists node B's slots", lambda: "slot    3" in res.stdout, 1))
+        results.append(wait_until("status command lists node B's slots", lambda: 3 in slots_in(res.stdout), 1))
 
         print("== Scenario 8: hostile peers are cut off (handshake timeout, duplicate manifest)")
         import socket as _socket
@@ -878,8 +898,7 @@ def main():
 
         res = g_tool("backup", "--out", str(OUT / "node-g-synced.fgpb"))
         results.append(wait_until("default backup of G holds only the synced slot 0",
-                                  lambda: res.returncode == 0 and "  slot 0:" in res.stdout
-                                  and "  slot 1:" not in res.stdout, 1))
+                                  lambda: res.returncode == 0 and set(slots_in(res.stdout)) == {0}, 1))
         res = g_tool("backup", "--include-local", "--out", str(OUT / "node-g-refused.fgpb"))
         results.append(wait_until("--include-local is refused while the full backup window is closed",
                                   lambda: res.returncode != 0 and "allow_full_backup" in (res.stdout + res.stderr)
@@ -889,9 +908,9 @@ def main():
         full = OUT / "node-g-full.fgpb"
         res = g_tool("backup", "--include-local", "--out", str(full))
         results.append(wait_until("full backup of G holds slot 0 and the local slots 1 and 2",
-                                  lambda: res.returncode == 0 and "  slot 0:" in res.stdout
-                                  and "  slot 1: 1536 bytes (local only)" in res.stdout
-                                  and "  slot 2: 1536 bytes (local only)" in res.stdout, 1))
+                                  lambda: res.returncode == 0 and 0 in slots_in(res.stdout)
+                                  and all(slots_in(res.stdout).get(n, {}).get("Kind") == "local only"
+                                          and slots_in(res.stdout)[n]["Bytes"] == "1536" for n in (1, 2)), 1))
         results.append(wait_until("node logs the full backup with synced and local counts",
                                   lambda: "template(s) sent (1 synced, 3 local-only)" in c.log("node-g"), 5))
 
@@ -982,11 +1001,11 @@ def main():
                                      "--host", f"127.0.0.1:{NODES['node-b']['port']}"],
                              capture_output=True, text=True, env=env, check=False)
         print(res.stdout + res.stderr)
-        lines = [line for line in res.stdout.splitlines() if "127.0.0.1:18533" in line]
+        rows = [r for r in table(res.stdout) if r["Node"] == "127.0.0.1:18533"]
         results.append(wait_until("tool log: C's entries in order, B has no access log",
-                                  lambda: res.returncode == 0 and len(lines) == 4
-                                  and "while_locked" in lines[0] and "unknown finger" in lines[1]
-                                  and "duress" in lines[2] and lines[3].endswith("matched")
+                                  lambda: res.returncode == 0 and [r["Result"] for r in rows]
+                                  == ["while_locked", "unknown", "duress", "matched"]
+                                  and rows[1]["Name"] == "(unknown finger)" and rows[2]["Slot"] == "150"
                                   and "18532: no access log" in res.stderr, 1))
         c.cmd("node-c", "dump_access")
         results.append(wait_until("dump_access_log writes the log to the node's log",
@@ -1037,7 +1056,8 @@ def main():
         def node(name):
             return f"127.0.0.1:{NODES[name]['port']}"
 
-        res = run_tool("status", "--host", "127.0.0.1", "--port", g_port, "--include-local")
+        # Node A never opened a full-backup window (G's window from scenario 11b may still be open).
+        res = run_tool("status", "--host", "127.0.0.1", "--port", str(NODES["node-a"]["port"]), "--include-local")
         results.append(wait_until("status --include-local is refused without allow_full_backup",
                                   lambda: res.returncode != 0 and "allow_full_backup" in res.stderr, 1))
         c.cmd("node-g", "allow_full_backup")
@@ -1045,14 +1065,15 @@ def main():
         res = run_tool("status", "--host", "127.0.0.1", "--port", g_port, "--include-local")
         results.append(wait_until("status --include-local lists G's local slots with their names",
                                   lambda: res.returncode == 0 and "1 synced finger(s)" in res.stdout
-                                  and any(line.startswith("  slot    3  local only") and "Ivo" in line
-                                          for line in res.stdout.splitlines()), 1))
+                                  and slots_in(res.stdout).get(3, {}).get("Kind") == "local only"
+                                  and slots_in(res.stdout)[3]["Name"] == "Ivo", 1))
         res = run_tool("compare", node("node-a"), node("node-b"))
         results.append(wait_until("compare: A and B hold the same synced fingers (exit 0)",
                                   lambda: res.returncode == 0 and " 0 different" in res.stdout, 1))
         res = run_tool("compare", node("node-a"), node("node-g"))
         results.append(wait_until("compare: A has fingers G does not sync (exit 1, 'only in A')",
-                                  lambda: res.returncode == 1 and "only in A" in res.stdout, 1))
+                                  lambda: res.returncode == 1
+                                  and any(r["Result"] == "only in A" for r in table(res.stdout)), 1))
         res = run_tool("compare", str(full), str(full))
         results.append(wait_until("compare: a backup with itself is identical",
                                   lambda: res.returncode == 0 and " 0 different" in res.stdout, 1))
@@ -1061,7 +1082,9 @@ def main():
         res = run_tool("copy", "--from", node("node-g"), "--to", node("node-h"), "--include-local",
                        "--slots", "3", "--dry-run")
         results.append(wait_until("copy --dry-run plans slot 3 and writes nothing",
-                                  lambda: res.returncode == 0 and "slot    3  copy  Ivo" in res.stdout
+                                  lambda: res.returncode == 0
+                                  and slots_in(res.stdout).get(3, {}).get("Action") == "copy"
+                                  and slots_in(res.stdout)[3]["Name"] == "Ivo"
                                   and c.slots("node-h") == h_before, 1))
         res = run_tool("copy", "--from", node("node-g"), "--to", node("node-h"), "--include-local", "--slots", "3")
         results.append(wait_until("copy refuses while the target's local slots are not visible",
@@ -1081,11 +1104,12 @@ def main():
                                   + (", slot 1 skipped (another finger there)" if clash else ""),
                                   lambda: res.returncode == 0 and c.slots("node-h").get(3) == "ivo"
                                   and name_on("node-h", 3, "Ivo")
-                                  and (c.slots("node-h").get(1) == h_before[1] and "SKIPPED" in res.stdout
+                                  and (c.slots("node-h").get(1) == h_before[1] and slots_in(res.stdout).get(1, {}).get("Action", "").startswith("SKIPPED")
                                        if clash else c.slots("node-h").get(1) == "gina"), 30))
         res = run_tool("copy", "--from", node("node-g"), "--to", node("node-h"), "--include-local", "--slots", "3")
         results.append(wait_until("copying again changes nothing (already there)",
-                                  lambda: res.returncode == 0 and "already there" in res.stdout
+                                  lambda: res.returncode == 0
+                                  and slots_in(res.stdout).get(3, {}).get("Action") == "already there (skipped)"
                                   and "Nothing to copy" in res.stdout, 1))
 
         sim_logs = "".join(c.path(n, "sim.log").read_text(encoding="utf-8") for n in NODES)

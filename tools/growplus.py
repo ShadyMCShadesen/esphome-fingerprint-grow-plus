@@ -17,8 +17,9 @@ Commands
   inspect --in FILE                        list the content of a backup file
   log     --host H [--host H2:PORT ...]    access log of one or more nodes (access_log:),
           [--csv]                          merged and sorted by time
-  compare A B [--include-local]            compare two backups and/or nodes (A, B = backup file
-                                           or host[:port]); exit code 1 if they differ
+  compare A B [--include-local] [--all]    compare two backups and/or nodes (A, B = backup file
+                                           or host[:port]); exit code 1 if they differ; --all
+                                           also lists identical slots
   copy    --from A --to H [--slots ..]     copy fingers from a node or backup file to another
           [--include-local] [--overwrite]  node (target must run allow_restore and
           [--dry-run]                      allow_full_backup first); slots that hold another
@@ -368,17 +369,16 @@ def cmd_status(args):
     if local is None:
         sys.exit("Node refused the local slots: run the fingerprint_grow_plus.allow_full_backup action "
                  "on the node first (or leave out --include-local)")
-    rows = {slot: f"{STATE_NAMES[meta >> 14]:<17} version {meta & 0x3FFF}{describe(extra)}"
+    rows = {slot: [slot, "synced", STATE_NAMES[meta >> 14], meta & 0x3FFF, *extra_cells(extra)]
             for slot, (meta, _h, extra) in entries.items()}
-    rows.update({slot: f"{'local only':<17} {'':9}{describe(extra)}" for slot, extra in local.items()})
+    rows.update({slot: [slot, "local only", "present", "", *extra_cells(extra)] for slot, extra in local.items()})
     present = [e for e in entries.values() if (e[0] >> 14) in (1, 2)]
     extras = [e[2] for e in present] + list(local.values())
     print(f"Node {ch.peer_id:08X} at {args.host}: {len(present)} synced finger(s), "
           f"{len(entries) - len(present)} deleted slot(s)"
           + (f", {len(local)} local-only finger(s)" if args.include_local else " (local-only slots not listed)"))
-    print(f"  {sum(1 for e in extras if e['name'])} named, {sum(1 for e in extras if e['expires'])} guest(s)")
-    for slot in sorted(rows):
-        print(f"  slot {slot:4d}  {rows[slot]}")
+    print(f"{sum(1 for e in extras if e['name'])} named, {sum(1 for e in extras if e['expires'])} guest(s)\n")
+    print_table(["Slot", "Kind", "State", "Version", *EXTRA_HEADERS], [rows[k] for k in sorted(rows)], "rllr")
 
 
 # --------------------------------------------------------------------------- snapshots
@@ -441,13 +441,30 @@ def same_extra(a: dict, b: dict) -> bool:
     return all(a.get(k, d) == b.get(k, d) for k, d in (("name", ""), ("expires", 0), ("uses", 0)))
 
 
-def describe(extra: dict) -> str:
-    text = f"  {extra['name']}" if extra.get("name") else ""
-    if extra.get("expires"):
-        text += f"  guest until {time.ctime(extra['expires'])}"
-    if extra.get("uses"):
-        text += f"  {extra['uses']} use(s) left"
-    return text
+# --------------------------------------------------------------------------- tables
+EXTRA_HEADERS = ["Name", "Guest until", "Uses left"]
+
+
+def extra_cells(extra: dict) -> list:
+    until = time.strftime("%Y-%m-%d %H:%M", time.localtime(extra["expires"])) if extra.get("expires") else ""
+    return [extra.get("name", ""), until, str(extra["uses"]) if extra.get("uses") else ""]
+
+
+def print_table(headers: list, rows: list, align: str = ""):
+    """Prints rows as an aligned text table ('r' in align = right-aligned column)."""
+    rows = [["" if v is None else str(v) for v in row] for row in rows]
+    widths = [max([len(h)] + [len(r[i]) for r in rows]) for i, h in enumerate(headers)]
+    align = align.ljust(len(headers), "l")
+
+    def line(cells):
+        return " | ".join(c.rjust(w) if a == "r" else c.ljust(w) for c, w, a in zip(cells, widths, align)).rstrip()
+
+    print(line(headers))
+    print("-+-".join("-" * w for w in widths))
+    for row in rows:
+        print(line(row))
+    if not rows:
+        print("(none)")
 
 
 def cmd_backup(args):
@@ -466,19 +483,23 @@ def cmd_backup(args):
                      "on the node first (or leave out --include-local)")
         todo += [(slot, True) for slot in sorted(local)]
     slots = {}
-    for slot, is_local in sorted(todo):
-        if wanted and slot not in wanted:
-            continue
+    table = []
+    todo = [(slot, is_local) for slot, is_local in sorted(todo) if not wanted or slot in wanted]
+    print(f"Reading {len(todo)} template(s) from {args.host} ...")
+    for slot, is_local in todo:
         result = fetch_template(ch, slot)
+        kind = "local only" if is_local else "synced"
         if result is None:
-            print(f"  slot {slot}: node could not read it", file=sys.stderr)
+            print(f"slot {slot}: node could not read it", file=sys.stderr)
+            table.append([slot, kind, "", "", "", "", "FAILED: not readable"])
             continue
         meta, extra, data = result
         slots[str(slot)] = {"meta": meta, "expires": extra["expires"], "uses": extra["uses"],
                             "name": extra["name"], "local": is_local,
                             "template": base64.b64encode(data).decode()}
-        print(f"  slot {slot}: {len(data)} bytes{' (local only)' if is_local else ''}{describe(extra)}")
+        table.append([slot, kind, len(data), *extra_cells(extra), "ok"])
     finish(ch)
+    print_table(["Slot", "Kind", "Bytes", *EXTRA_HEADERS, "Result"], table, "rlr")
     write_backup(args.out, key, {"node": f"{ch.peer_id:08X}", "host": args.host, "created": int(time.time()),
                                  "slots": slots})
     n_local = sum(1 for e in slots.values() if e["local"])
@@ -487,11 +508,15 @@ def cmd_backup(args):
 
 def cmd_inspect(args):
     data = read_backup(args.input, load_key(args))
-    print(f"Backup of node {data['node']} ({data['host']}), created {time.ctime(data['created'])}")
+    print(f"Backup of node {data['node']} ({data['host']}), created {time.ctime(data['created'])}: "
+          f"{len(data['slots'])} template(s)\n")
+    table = []
     for slot, entry in sorted(data["slots"].items(), key=lambda kv: int(kv[0])):
         size = len(base64.b64decode(entry["template"]))
-        kind = "local only" if entry.get("local") else f"version {entry['meta'] & 0x3FFF}"
-        print(f"  slot {int(slot):4d}  {kind:12s}  {size} bytes{describe(entry)}")
+        local = entry.get("local")
+        table.append([int(slot), "local only" if local else "synced", "" if local else entry["meta"] & 0x3FFF,
+                      size, *extra_cells(entry)])
+    print_table(["Slot", "Kind", "Version", "Bytes", *EXTRA_HEADERS], table, "rlrr")
 
 
 def cmd_restore(args):
@@ -501,21 +526,20 @@ def cmd_restore(args):
     ch = connect(args, key)
     read_manifest(ch)
     ok = 0
+    table = []
     for slot_text, entry in sorted(data["slots"].items(), key=lambda kv: int(kv[0])):
         slot = int(slot_text)
         if wanted and slot not in wanted:
             continue
         result = restore_slot(ch, slot, entry)
-        if result == 0:
-            ok += 1
-            print(f"  slot {slot}: restored")
-        elif result == 2:
+        if result == 2:
             finish(ch)
             sys.exit("Node refused the restore: run the fingerprint_grow_plus.allow_restore action on the node first")
-        else:
-            print(f"  slot {slot}: FAILED on the node", file=sys.stderr)
+        ok += result == 0
+        table.append([slot, *extra_cells(entry), "restored" if result == 0 else "FAILED on the node"])
     finish(ch)
-    print(f"{ok} template(s) restored; synced slots are propagated to the peers, local-only slots stay on the node")
+    print_table(["Slot", *EXTRA_HEADERS, "Result"], table, "r")
+    print(f"\n{ok} template(s) restored; synced slots are propagated to the peers, local-only slots stay on the node")
 
 
 def cmd_compare(args):
@@ -528,25 +552,40 @@ def cmd_compare(args):
         b = {k: v for k, v in b.items() if k in wanted}
     print(f"A = {label_a} ({len(a)} finger(s))\nB = {label_b} ({len(b)} finger(s))")
     if not args.include_local and not (os.path.isfile(args.a) and os.path.isfile(args.b)):
-        print("  (local-only slots of nodes are not compared; use --include-local)")
-    same = 0
-    lines = []
+        print("(local-only slots of nodes are not compared; use --include-local)")
+    print()
+
+    def short(e):
+        if e is None:
+            return "-"
+        name, until, uses = extra_cells(e)
+        return ", ".join(x for x in (name, f"guest until {until}" if until else "", f"{uses} use(s)" if uses else "")
+                         if x) or "(no name)"
+
+    same = different = 0
+    table = []
     for slot in sorted(set(a) | set(b)):
         ea, eb = a.get(slot), b.get(slot)
         if eb is None:
-            lines.append(f"  slot {slot:4d}  only in A{describe(ea)}")
+            result = "only in A"
         elif ea is None:
-            lines.append(f"  slot {slot:4d}  only in B{describe(eb)}")
+            result = "only in B"
         elif ea["hash"] != eb["hash"]:
-            lines.append(f"  slot {slot:4d}  different template (another finger or enrolled again)"
-                         f"  A:{describe(ea) or ' -'}  B:{describe(eb) or ' -'}")
+            result = "different template"
         elif not same_extra(ea, eb):
-            lines.append(f"  slot {slot:4d}  same finger, other data  A:{describe(ea) or ' -'}  B:{describe(eb) or ' -'}")
+            result = "same finger, other data"
         else:
             same += 1
-    print("\n".join(lines))
-    print(f"{same} identical, {len(lines)} different")
-    sys.exit(1 if lines else 0)
+            if not args.all:
+                continue
+            result = "identical"
+        different += result != "identical"
+        table.append([slot, result, short(ea), short(eb)])
+    print_table(["Slot", "Result", "A", "B"], table, "r")
+    print(f"\n{same} identical, {different} different"
+          + ("  ('different template' = another finger or the same finger enrolled again)"
+             if any(row[1] == "different template" for row in table) else ""))
+    sys.exit(1 if different else 0)
 
 
 def restore_slot(ch: Channel, slot: int, entry: dict) -> int:
@@ -575,26 +614,31 @@ def cmd_copy(args):
     hidden = target_local is None
     if hidden:
         target_local = {}
-        print("  note: the target's local-only slots are not visible (allow_full_backup is not active there)")
+        print("note: the target's local-only slots are not visible (allow_full_backup is not active there)")
+    print()
     plan = []
+    table = []
     for slot, entry in sorted(src.items()):
         if slot in target and target[slot][0] == entry["hash"]:
             if same_extra(entry, target[slot][1]):
-                print(f"  slot {slot:4d}  already there, skipped{describe(entry)}")
+                table.append([slot, "already there (skipped)", *extra_cells(entry)])
                 continue
             # Same finger, other name / guest data: taking over the data replaces nothing.
             plan.append((slot, entry))
-            print(f"  slot {slot:4d}  update name / guest data{describe(entry)}")
+            table.append([slot, "update name / guest data", *extra_cells(entry)])
             continue
         occupied = slot in target or slot in target_local
         if occupied and not args.overwrite:
-            print(f"  slot {slot:4d}  SKIPPED: the target holds another finger here (--overwrite replaces it)")
+            table.append([slot, "SKIPPED: other finger on target", *extra_cells(entry)])
             continue
         plan.append((slot, entry))
-        print(f"  slot {slot:4d}  {'replace' if occupied else 'copy'}{describe(entry)}")
+        table.append([slot, "replace" if occupied else "copy", *extra_cells(entry)])
+    print_table(["Slot", "Action", *EXTRA_HEADERS], table, "r")
+    if any(row[1].startswith("SKIPPED") for row in table):
+        print("(--overwrite replaces other fingers on the target)")
     if args.dry_run or not plan:
         finish(ch)
-        print(f"{len(plan)} slot(s) would be written" if args.dry_run else "Nothing to copy")
+        print(f"\n{len(plan)} slot(s) would be written" if args.dry_run else "\nNothing to copy")
         return
     if hidden and not args.overwrite:
         finish(ch)
@@ -609,17 +653,17 @@ def cmd_copy(args):
         if result == 0:
             ok += 1
         else:
-            print(f"  slot {slot}: FAILED on the target", file=sys.stderr)
+            print(f"slot {slot}: FAILED on the target", file=sys.stderr)
     finish(ch)
-    print(f"{ok} of {len(plan)} finger(s) copied; synced slots are propagated to the target's peers")
+    print(f"\n{ok} of {len(plan)} finger(s) copied; synced slots are propagated to the target's peers")
 
 
 def cmd_log(args):
     key = load_key(args)
     rows = []
     for spec in args.host:
-        host, _, port = spec.partition(":")
-        node_args = argparse.Namespace(host=host, port=int(port) if port else args.port, timeout=args.timeout)
+        host, port = split_host(spec, args.port)
+        node_args = argparse.Namespace(host=host, port=port, timeout=args.timeout)
         try:
             ch = connect(node_args, key)
             read_manifest(ch)
@@ -635,6 +679,7 @@ def cmd_log(args):
     rows.sort(key=lambda e: e["time"])
     if args.csv:
         print("time,node,slot,name,result,confidence,flags")
+    table = []
     for e in rows:
         when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(e["time"]))
         flags = " ".join(n for bit, n in ACCESS_FLAGS if e["flags"] & bit)
@@ -643,12 +688,13 @@ def cmd_log(args):
             name = e["name"].replace('"', '""')
             print(f'{when},{e["node"]},{slot},"{name}",{e["result"]},{e["confidence"]},{flags}')
             continue
-        who = "unknown finger" if not slot else f"slot {slot:>4}" + (f"  {e['name']}" if e["name"] else "")
         approx = "" if e["clock"] else "~"  # node clock was not set: time estimated from its uptime
-        print(f"{approx}{when}  {e['node']:<22} {who:<32} {e['result']}"
-              + (f" ({flags})" if flags else ""))
+        table.append([approx + when, e["node"], slot or "-", e["name"] if slot else "(unknown finger)",
+                      e["result"], e["confidence"] if slot else "", flags])
     if not args.csv:
-        print(f"{len(rows)} entr{'y' if len(rows) == 1 else 'ies'}")
+        print_table(["Time", "Node", "Slot", "Name", "Result", "Score", "Flags"], table, "llrllr")
+        print(f"\n{len(rows)} entr{'y' if len(rows) == 1 else 'ies'}"
+              + ("  (~ = node clock not set, time estimated from its uptime)" if any(not e["clock"] for e in rows) else ""))
 
 
 def main():
@@ -676,8 +722,9 @@ def main():
     p.add_argument("--port", type=int, default=DEFAULT_PORT, help="default port for nodes")
     p.add_argument("--timeout", type=float, default=30)
     p.add_argument("--slots", help="e.g. 0,2,10-19 (default: all)")
-    p.add_argument("--include-local", "--all", action="store_true",
+    p.add_argument("--include-local", action="store_true",
                    help="also compare a node's local-only slots (needs allow_full_backup there)")
+    p.add_argument("--all", action="store_true", help="also list identical slots")
     p.set_defaults(func=cmd_compare)
     p = sub.add_parser("copy")
     common(p, needs_host=False)

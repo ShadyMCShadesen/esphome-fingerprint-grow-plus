@@ -413,7 +413,7 @@ Weitere Befehle desselben Tools:
 | Befehl | Zweck |
 |---|---|
 | `status --host H [--include-local]` | alle Slots mit Name, Gast-Ablauf und Nutzungen auflisten |
-| `compare A B [--include-local]` | Backups und/oder Geräte vergleichen (`A`, `B` = Datei oder `host[:port]`); Exit-Code 1 bei Unterschieden |
+| `compare A B [--include-local] [--all]` | Backups und/oder Geräte als Tabelle vergleichen (`A`, `B` = Datei oder `host[:port]`); `--all` zeigt auch identische Slots; Exit-Code 1 bei Unterschieden |
 | `copy --from A --to H [--slots ..] [--dry-run] [--overwrite]` | Finger von einem Gerät oder Backup auf ein anderes Gerät kopieren |
 | `log --host H1 --host H2:18531 [--csv]` | zusammengeführtes Zugriffsprotokoll (siehe [Zugriffsprotokoll](#zugriffsprotokoll)) |
 

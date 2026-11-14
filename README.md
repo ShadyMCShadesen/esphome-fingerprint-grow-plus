@@ -387,7 +387,7 @@ More commands of the same tool:
 | Command | Purpose |
 |---|---|
 | `status --host H [--include-local]` | list the slots with name, guest expiry and uses |
-| `compare A B [--include-local]` | compare backups and/or nodes (`A`, `B` = file or `host[:port]`); exit code 1 if different |
+| `compare A B [--include-local] [--all]` | compare backups and/or nodes (`A`, `B` = file or `host[:port]`) as a table; `--all` also lists identical slots; exit code 1 if different |
 | `copy --from A --to H [--slots ..] [--dry-run] [--overwrite]` | copy fingers from a node or backup to another node (same slots, with names; `allow_restore` + `allow_full_backup` on the target) |
 | `log --host H1 --host H2:18531 [--csv]` | merged access log (see [Access log](#access-log)) |
 
